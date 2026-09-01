@@ -3,7 +3,6 @@
 """
 
 import logging
-import typing as tp
 from ast import literal_eval
 from copy import deepcopy
 
