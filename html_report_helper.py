@@ -261,7 +261,7 @@ def show_criteria_semaphore(
 
     try:
         return criterion.style.hide().set_table_styles(styles)
-    except:
+    except Exception:
         return criterion.style.hide_index().set_table_styles(styles)
 
 
@@ -307,7 +307,7 @@ def show_criteria_semaphore_without_red(green_criterion, yellow_criterion, style
 
     try:
         return criterion.style.hide().set_table_styles(styles)
-    except:
+    except Exception:
         return criterion.style.hide_index().set_table_styles(styles)
 
 
@@ -353,7 +353,7 @@ def show_criteria_semaphore_without_yellow(green_criterion, red_criterion, style
 
     try:
         return criterion.style.hide().set_table_styles(styles)
-    except:
+    except Exception:
         return criterion.style.hide_index().set_table_styles(styles)
 
 
