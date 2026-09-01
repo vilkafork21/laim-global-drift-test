@@ -1,0 +1,220 @@
+{
+  "id": "8857160e-f104-4116-a865-5bfbc599f6a7",
+  "name": "LAIM global drift test",
+  "description": "Тест на глобальный дрифт запросов из llm_val",
+  "fullDescription": "",
+  "ui": {
+    "settings": [
+      {
+        "page": "General",
+        "title": "General",
+        "components": [
+          {
+            "type": "form",
+            "label": "Настройки теста",
+            "config": {
+              "components": [
+                {
+                  "parameter": "n_chunks",
+                  "label": "Число подвыборок (минимум 5)",
+                  "uiComponent": "input",
+                  "type": "integer",
+                  "defaultValue": 10
+                },
+                {
+                  "parameter": "p_value",
+                  "label": "Порог p-value (FDR Бенджамини—Хохберга)",
+                  "uiComponent": "input",
+                  "type": "float",
+                  "defaultValue": 0.05
+                },
+                {
+                  "parameter": "corr_threshold",
+                  "label": "Порог |корреляции Пирсона|",
+                  "uiComponent": "input",
+                  "type": "float",
+                  "defaultValue": 0.3
+                },
+                {
+                  "parameter": "metric_agg",
+                  "label": "Способ агрегации",
+                  "uiComponent": "select",
+                  "type": "string",
+                  "allowedValues": [
+                    {
+                      "Среднее по каждой колонке": "single_mean"
+                    },
+                    {
+                      "Среднее по всем колонкам": "multicol_mean"
+                    }
+                  ],
+                  "defaultValue": "single_mean"
+                },
+                {
+                  "parameter": "data_types",
+                  "label": "Типы данных в Sampler",
+                  "uiComponent": "input",
+                  "type": "string",
+                  "defaultValue": "('train', 'test')"
+                },
+                {
+                  "parameter": "green_threshold",
+                  "label": "Верхняя граница зелёной зоны (|Δметрика|)",
+                  "uiComponent": "input",
+                  "type": "float",
+                  "defaultValue": 0.15
+                },
+                {
+                  "parameter": "red_threshold",
+                  "label": "Нижняя граница красной зоны (|Δметрика|)",
+                  "uiComponent": "input",
+                  "type": "float",
+                  "defaultValue": 0.25
+                },
+                {
+                  "parameter": "greater_is_better",
+                  "label": "Чем выше метрика, тем лучше",
+                  "uiComponent": "checkbox",
+                  "defaultValue": true
+                },
+                {
+                  "parameter": "random_state",
+                  "label": "Random state",
+                  "uiComponent": "input",
+                  "type": "integer",
+                  "defaultValue": 42
+                },
+                {
+                  "parameter": "is_info",
+                  "label": "Тест информативный?",
+                  "uiComponent": "checkbox",
+                  "defaultValue": false
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ],
+    "uiResults": {
+      "semaphore": {
+        "port": "all_results",
+        "dataKey": "color"
+      }
+    },
+    "result": {
+      "title": "Results",
+      "components": [
+        {
+          "label": "Результат теста",
+          "type": "semaphore",
+          "config": {
+            "datasets": [
+              {
+                "value": "$.all_results.calculated_traffic_lights.test_light",
+                "title": "$.all_results.calculated_traffic_lights.semaphore_title"
+              }
+            ]
+          },
+          "order": 1,
+          "showOnWorkflow": true
+        },
+        {
+          "type": "html",
+          "label": "Описание теста",
+          "uiComponent": "html",
+          "parameter": "$.test_description",
+          "config": {
+            "datasets": [
+              {
+                "data": "$.test_description"
+              }
+            ]
+          },
+          "order": 2
+        }
+      ]
+    }
+  },
+  "ports": [
+    {
+      "name": "reference_umr",
+      "label": "Reference UMR",
+      "in": true,
+      "type": "dataframe",
+      "shape": "shape_dataframe",
+      "description": "Эталонный плоский laim-umr.v2",
+      "required": true,
+      "order": 1
+    },
+    {
+      "name": "monitoring_umr",
+      "label": "Scored monitoring UMR",
+      "in": true,
+      "type": "dataframe",
+      "shape": "shape_dataframe",
+      "description": "Выход scored_data автоассессора с обязательным main_metric; QA/dialogue нормализуется внутри Drift",
+      "required": true,
+      "order": 2
+    },
+    {
+      "name": "monitoring_metric",
+      "label": "Monitoring metric",
+      "in": true,
+      "type": "default",
+      "shape": "shape_model",
+      "description": "Валидированный контракт laim-monitoring-metric.v2",
+      "required": true,
+      "order": 3
+    },
+    {
+      "name": "all_results",
+      "label": "all_results",
+      "in": false,
+      "type": "default",
+      "shape": "shape_model",
+      "description": "Результаты прохождения теста",
+      "order": 4
+    },
+    {
+      "name": "test_description",
+      "label": "test_description",
+      "in": false,
+      "type": "hidden",
+      "shape": "shape_model",
+      "description": "Описание теста",
+      "order": 5
+    }
+  ],
+  "script": {
+    "type": "python",
+    "baseImageKey": "py312-simple",
+    "deployType": "docker",
+    "runConfiguration": {
+      "libraryDependencies": [
+        "requirements.txt"
+      ],
+      "sourceFiles": [
+        "main.py",
+        "html_report_helper.py",
+        "config.py",
+        "giga_wraper.py",
+        "llm_val/report_helper.py",
+        "llm_val/sampler.py",
+        "llm_val/scorer.py",
+        "llm_val/utils.py",
+        "llm_val/valtest_global_drift_stability.py",
+        "llm_val/valtest_metric.py",
+        "laim_monitoring/__init__.py",
+        "laim_monitoring/core.py"
+      ],
+      "functionName": "main",
+      "functionParameters": [],
+      "output": {
+        "type": "json",
+        "output": []
+      }
+    }
+  },
+  "shape": "other"
+}

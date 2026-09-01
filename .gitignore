@@ -1,0 +1,6 @@
+run.py
+logs/
+__pycache__
+.venv
+somefile.html
+CLAUDE.md
