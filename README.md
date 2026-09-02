@@ -87,26 +87,26 @@ laim-kriteria-selector.validated_monitoring_metric ► monitoring_metric
 Пример лога успешного прогона (формат строк — из кода; значения условные):
 
 ```text
-INFO root: Размер OOS (real): 320
-INFO root: Размер OOT (agent): 80
-INFO root: Тест на глобальный дрифт запущен
-WARNING root: n_chunks=10 мало для 11 фичей; рекомендуется ≥ 44. Регрессия будет регуляризована (Ridge), но статистическая значимость низкая.
-INFO root: n_chunks 10 → 16 (адаптив от |add|=160, запрошено 16, потолок 80)
-INFO root: Получение эмбеддингов base (n=160)
-INFO root: Деление add на 16 чанков
-INFO root: Медианный размер чанка: 10
-WARNING root: BH-FDR пуст — top-3 из |r|>0.3 (низкая значимость)
-INFO root: Отобрано 3 фичей: ['ADi_std', 'ADi_q95', 'ADi_q75'] (low_confidence=True)
-INFO root: Выставление светофора по метрике на OOS
+INFO llm_val.sampler: Размер OOS (real): 320
+INFO llm_val.sampler: Размер OOT (agent): 80
+INFO main: Тест на глобальный дрифт запущен
+WARNING llm_val.valtest_global_drift_stability: n_chunks=10 мало для 11 фичей; рекомендуется ≥ 44. Регрессия будет регуляризована (Ridge), но статистическая значимость низкая.
+INFO llm_val.valtest_global_drift_stability: n_chunks 10 → 16 (адаптив от |add|=160, запрошено 16, потолок 80)
+INFO llm_val.valtest_global_drift_stability: Получение эмбеддингов base (n=160)
+INFO llm_val.valtest_global_drift_stability: Деление add на 16 чанков
+INFO llm_val.valtest_global_drift_stability: Медианный размер чанка: 10
+WARNING llm_val.valtest_global_drift_stability: BH-FDR пуст — top-3 из |r|>0.3 (низкая значимость)
+INFO llm_val.valtest_global_drift_stability: Отобрано 3 фичей: ['ADi_std', 'ADi_q95', 'ADi_q75'] (low_confidence=True)
+INFO llm_val.valtest_global_drift_stability: Выставление светофора по метрике на OOS
 ```
 
 Предупреждение о 44 чанках исчезает лишь при `n_chunks >= 44`, то есть при
 `|OOSadd| >= 440`. Сбой и деградация шлюза эмбеддингов выглядят так:
 
 ```text
-WARNING root: GigaEmbed: 3 из 160 текстов длиннее 1000 символов — разбиты на части
-WARNING root: GigaEmbed batch failed (attempt 1/3): <текст ошибки>; повтор через 1.0s
-WARNING root: GigaEmbed: лимит токенов — разбиваю 100 текстов на части
+WARNING giga_wraper: GigaEmbed: 3 из 160 текстов длиннее 1000 символов — разбиты на части
+WARNING giga_wraper: GigaEmbed batch failed (attempt 1/3): <текст ошибки>; повтор через 1.0s
+WARNING giga_wraper: GigaEmbed: лимит токенов — разбиваю 100 текстов на части
 ```
 
 ## Форматы выхода и контракты
