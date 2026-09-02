@@ -120,3 +120,11 @@ def test_judge_refusals_do_not_fail_drift_frames():
 
     assert len(reference_frame) == 3
     assert monitoring_frame["target"].tolist() == [1.0, 0.0]
+
+
+def test_computed_verdict_carries_population_sizes():
+    # n_oos/n_oot публикуются и на успешном пути: без них вердикт нельзя
+    # соотнести с популяцией, на которой он посчитан.
+    res = _run_valtest(_reference_frame(), _monitoring_frame())
+    pre = res["precomputed"]
+    assert pre["n_oos"] == 160 and pre["n_oot"] == 60
