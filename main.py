@@ -16,7 +16,7 @@ from llm_val.valtest_global_drift_stability import (
     MIN_CHUNKS,
     valtest_global_drift_stability,
 )
-from laim_monitoring import prepare_drift_frames
+from laim_monitoring import prepare_drift_frames, validate_monitoring_metric
 
 from html_report_helper import display_semaphore, show_criteria_semaphore
 
@@ -52,12 +52,12 @@ def html_report_valtest_global_drift(res, semaphore_title):
 
     green_criterion = (
         "Абсолютное снижение ключевой метрики менее 15 п.п. "
-        "И светофор OOT — «Зелёный»"
+        "И светофор метрики на OOS — «Зелёный»"
     )
     yellow_criterion = "Иначе"
     red_criterion = (
         "Абсолютное снижение ключевой метрики качества более 25 п.п. "
-        "ИЛИ светофор OOT — «Красный»"
+        "ИЛИ светофор метрики на OOS — «Красный»"
     )
     grey_criterion = (
         "Нет ни одной оценённой единицы мониторинга "
@@ -235,6 +235,31 @@ def main(
     - main_metric перезаписывается на "target" после rename (P1-10)
     - Удалены устаревшие `top_distance_features` (заменены фиксированным набором scale-aware фичей в valtest)
     """
+    contract = validate_monitoring_metric(monitoring_metric, require_computed=False)
+    if contract["status"] == "not_computable":
+        logger.warning(
+            "Глобальный дрифт не вычисляется: %s",
+            contract.get("reason", "причина не указана"),
+        )
+        report_result = report_valtest_global_drift(
+            {
+                "report": {"semaphore": "gray"},
+                "precomputed": {
+                    "status": "not_computable",
+                    "reason_code": contract.get("reason_code"),
+                    "reason": contract.get("reason"),
+                    "metric_value": None,
+                    "metric_value_estimate": None,
+                },
+            },
+            _SEMAPHORE_TITLE["gray"],
+        )
+        report_result["all_results"]["test_name"] = "global_drift"
+        return {
+            "all_results": report_result["all_results"],
+            "test_description": report_result["hidden_port"],
+        }
+
     # Защитный literal_eval (P1-6 в local-аналогии)
     if isinstance(data_types, str):
         data_types = literal_eval(data_types)
