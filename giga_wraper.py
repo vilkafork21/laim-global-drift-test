@@ -11,6 +11,8 @@ from typing import Iterable, List, Optional
 import numpy as np
 from gigachat import GigaChat
 
+logger = logging.getLogger(__name__)
+
 
 # Размер батча на один запрос к GigaChat /embeddings.
 # Подобран эмпирически с запасом против лимита API.
@@ -57,7 +59,7 @@ class GigaEmbed(GigaChat):
 
         chunked = sum(len(text) > self._max_chars for text in texts)
         if chunked:
-            logging.warning(
+            logger.warning(
                 "GigaEmbed: %d из %d текстов длиннее %d символов — разбиты на части",
                 chunked,
                 len(texts),
@@ -102,7 +104,7 @@ class GigaEmbed(GigaChat):
                 if self._is_token_limit_error(err) and any(
                     len(text) > self._min_chars for text in batch
                 ):
-                    logging.warning(
+                    logger.warning(
                         "GigaEmbed: лимит токенов — разбиваю %d текстов на части",
                         len(batch),
                     )
@@ -121,7 +123,7 @@ class GigaEmbed(GigaChat):
                         f"GigaEmbed: исчерпаны попытки ({self._retries})"
                     ) from last_err
                 wait = self._base_backoff * (2 ** (net_attempts - 1))
-                logging.warning(
+                logger.warning(
                     "GigaEmbed batch failed (attempt %d/%d): %s; повтор через %.1fs",
                     net_attempts,
                     self._retries,

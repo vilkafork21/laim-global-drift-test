@@ -9,6 +9,8 @@ from copy import deepcopy
 import pandas as pd
 from llm_val.utils import string_to_float
 
+logger = logging.getLogger(__name__)
+
 
 class Sampler:
     """
@@ -98,8 +100,8 @@ class AutoAsessorSampler(Sampler):
 
         agent_df = process_df(agent_df, "agent")
         real_df = process_df(real_df, "real")
-        logging.info(f"Размер OOS (real): {len(real_df)}")
-        logging.info(f"Размер OOT (agent): {len(agent_df)}")
+        logger.info(f"Размер OOS (real): {len(real_df)}")
+        logger.info(f"Размер OOT (agent): {len(agent_df)}")
 
         self.train = {
             "X": real_df[["question", "answer"]].reset_index(drop=True),
@@ -132,5 +134,5 @@ class AutoAsessorSampler(Sampler):
                 {"question": question or "", "answer": answer or "", "target": target}
             )
         if skipped:
-            logging.warning(f"[{name}] пропущено {skipped} строк с битым 'history'")
+            logger.warning(f"[{name}] пропущено {skipped} строк с битым 'history'")
         return pd.DataFrame(records)

@@ -21,6 +21,8 @@ from sklearn.linear_model import RidgeCV
 from sklearn.metrics.pairwise import cosine_distances
 from sklearn.model_selection import train_test_split
 
+logger = logging.getLogger(__name__)
+
 
 # Минимальное число чанков для статистически осмысленной корреляции (P0-5).
 MIN_CHUNKS = 5
@@ -232,7 +234,7 @@ def valtest_global_drift_stability(
             f"n_chunks={n_chunks} < {MIN_CHUNKS}: корреляционный тест статистически неинформативен"
         )
     if n_chunks < MIN_CHUNKS_PER_FEATURE * n_features:
-        logging.warning(
+        logger.warning(
             f"n_chunks={n_chunks} мало для {n_features} фичей; "
             f"рекомендуется ≥ {MIN_CHUNKS_PER_FEATURE * n_features}. "
             "Регрессия будет регуляризована (Ridge), но статистическая значимость низкая."
@@ -245,7 +247,7 @@ def valtest_global_drift_stability(
     metric_value_source = "precomputed"
 
     if metric_value_estimate is None:
-        logging.info("Метрика на новых данных не вычислена заранее — начало вычисления")
+        logger.info("Метрика на новых данных не вычислена заранее — начало вычисления")
         sampler_copy = deepcopy(sampler)
         if metric_binarizer is not None:
             train_data = getattr(sampler_copy, data_types[0])
@@ -303,7 +305,7 @@ def valtest_global_drift_stability(
         feasible_max = max(MIN_CHUNKS, min(MAX_CHUNKS, len(add_X) // 2))
         final_chunks = min(requested, feasible_max)
         if final_chunks != n_chunks:
-            logging.info(
+            logger.info(
                 f"n_chunks {n_chunks} → {final_chunks} (адаптив от |add|={len(add_X)}, "
                 f"запрошено {requested}, потолок {feasible_max})"
             )
@@ -320,16 +322,16 @@ def valtest_global_drift_stability(
         base_X = base_X.loc[list(base_idx_kept)]
         base_Y = base_Y.loc[list(base_idx_kept)]
 
-        logging.info(f"Получение эмбеддингов base (n={len(base_q_list)})")
+        logger.info(f"Получение эмбеддингов base (n={len(base_q_list)})")
         base_embeddings = np.asarray(model.get_embedding(list(base_q_list)), dtype=float)
         if np.isnan(base_embeddings).any():
-            logging.warning("В base_embeddings есть NaN — заменяю на 0")
+            logger.warning("В base_embeddings есть NaN — заменяю на 0")
             base_embeddings = np.nan_to_num(base_embeddings, nan=0.0)
 
-        logging.info(f"Деление add на {n_chunks} чанков")
+        logger.info(f"Деление add на {n_chunks} чанков")
         chunk_idx_splits = np.array_split(add_X.index.values, n_chunks)
         chunk_size_avg = int(np.median([len(s) for s in chunk_idx_splits]))
-        logging.info(f"Медианный размер чанка: {chunk_size_avg}")
+        logger.info(f"Медианный размер чанка: {chunk_size_avg}")
 
         features = np.zeros((n_chunks, n_features), dtype=float)
         test_metric_values = np.zeros(n_chunks, dtype=float)
@@ -356,7 +358,7 @@ def valtest_global_drift_stability(
         # Отбор фичей: BH-FDR + гарантированный top-K фолбэк. Пустой отбор не
         # нужен: светофор считается по фактической метрике scored_data, фичи —
         # диагностика дрифта. cap — анти-переобучение регрессии.
-        logging.info("Отбор фичей: Пирсон + BH-FDR (+ top-K фолбэк)")
+        logger.info("Отбор фичей: Пирсон + BH-FDR (+ top-K фолбэк)")
         all_corr = []
         for j in range(n_features):
             if np.std(features[:, j]) == 0.0:
@@ -390,7 +392,7 @@ def valtest_global_drift_stability(
             selected_features = [
                 c[0] for c in sorted(strong, key=lambda c: -abs(c[1]))[:cap]
             ]
-            logging.warning(
+            logger.warning(
                 f"BH-FDR пуст — top-{len(selected_features)} из |r|>{corr_threshold} "
                 "(низкая значимость)"
             )
@@ -399,12 +401,12 @@ def valtest_global_drift_stability(
             selected_features = [
                 c[0] for c in sorted(all_corr, key=lambda c: -abs(c[1]))[:cap]
             ]
-            logging.warning(
+            logger.warning(
                 f"Ни одна фича не прошла |r|>{corr_threshold} — гарантированный "
                 f"top-{len(selected_features)} по |r| (низкая значимость)"
             )
 
-        logging.info(
+        logger.info(
             f"Отобрано {len(selected_features)} фичей: {selected_features} "
             f"(low_confidence={selection_low_confidence})"
         )
@@ -435,7 +437,7 @@ def valtest_global_drift_stability(
         metric_value_source = "assessor_scored_data"
 
         if metric_value is None or test_color is None:
-            logging.info("Выставление светофора по метрике на OOS")
+            logger.info("Выставление светофора по метрике на OOS")
             metric_result = valtest_metric(
                 sampler=sampler_copy,
                 scorer=scorer,
@@ -471,7 +473,7 @@ def valtest_global_drift_stability(
                 "дрифта недоступна"
             ),
         })
-    logging.info("Начало составления отчёта")
+    logger.info("Начало составления отчёта")
     report = report_valtest_global_drift_stability(
         metric_value=metric_value,
         metric_value_estimate=metric_value_estimate,
