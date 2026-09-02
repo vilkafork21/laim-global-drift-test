@@ -59,8 +59,7 @@ laim-kriteria-selector.validated_monitoring_metric ► monitoring_metric
 | `n_chunks` | `10` в `descriptor.json`; `MIN_CHUNKS = 5` — значение по умолчанию `main()` при прямом вызове без настройки и жёсткий минимум | Число подвыборок OOSadd. Значение `< 5` — `ValueError`. Это нижняя граница: код поднимает число чанков адаптивно (не меньше 10 строк на чанк, не больше 120, не больше `|OOSadd| // 2`). От переданного значения зависит порог серого: `n_oos < 2 * n_chunks - 1` |
 | `p_value` | `0.05` | Уровень FDR Бенджамини—Хохберга при отборе признаков |
 | `corr_threshold` | `0.3` | Порог `|r|` Пирсона для «сильных» признаков |
-| `metric_agg` | `single_mean` | Не менять: `multicol_mean` возвращает ключ `multicol_mean` вместо `target`, и тест падает с `KeyError: 'target'` |
-| `data_types` | `('train', 'test')` | Не менять: семплер заполняет только `train` (OOS) и `test` (OOT) |
+| `metric_agg` | `single_mean` | Способ агрегации `target`; единственное поддерживаемое значение — в UI других нет |
 | `green_threshold` | `0.15` | Снижение КМ меньше порога — зелёный |
 | `red_threshold` | `0.25` | Снижение КМ от порога и выше — красный; пороги нормализуются `min`/`max` |
 | `greater_is_better` | `true` | `false` меняет знак: рост КМ считается ухудшением, гейт по OOS тоже переворачивается |
@@ -154,7 +153,6 @@ WARNING root: GigaEmbed: лимит токенов — разбиваю 100 те
 | Нет колонки `main_metric` в эталоне или мониторинге; `main_metric` не константен внутри сессии | `MonitoringContractError` |
 | `n_chunks < 5` | `ValueError` |
 | Все запросы OOSbase пустые | `ValueError` |
-| `metric_agg = multicol_mean` | `KeyError: 'target'` |
 | Шлюз эмбеддингов недоступен после ретраев | `RuntimeError` из `GigaEmbed` |
 
 Деградация (серый или пометка, прогон завершается):
