@@ -456,6 +456,10 @@ def valtest_global_drift_stability(
         "feature_correlations": feature_correlations,
         "selection_low_confidence": selection_low_confidence,
         "n_chunks": int(n_chunks),
+        # Знаменатели вердикта нужны потребителю на любом исходе, не только
+        # при отказе от отбора признаков.
+        "n_oos": len(getattr(sampler, data_types[0])["X"]),
+        "n_oot": len(getattr(sampler, data_types[1])["X"]),
     }
     if not selected_features:
         precomputed.update({
@@ -466,8 +470,6 @@ def valtest_global_drift_stability(
                 "признаки расстояний константны — диагностика влияния "
                 "дрифта недоступна"
             ),
-            "n_oos": len(getattr(sampler, data_types[0])["X"]),
-            "n_oot": len(getattr(sampler, data_types[1])["X"]),
         })
     logging.info("Начало составления отчёта")
     report = report_valtest_global_drift_stability(
