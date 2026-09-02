@@ -43,19 +43,9 @@
                   "allowedValues": [
                     {
                       "Среднее по каждой колонке": "single_mean"
-                    },
-                    {
-                      "Среднее по всем колонкам": "multicol_mean"
                     }
                   ],
                   "defaultValue": "single_mean"
-                },
-                {
-                  "parameter": "data_types",
-                  "label": "Типы данных в Sampler",
-                  "uiComponent": "input",
-                  "type": "string",
-                  "defaultValue": "('train', 'test')"
                 },
                 {
                   "parameter": "green_threshold",
