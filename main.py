@@ -20,6 +20,8 @@ from laim_monitoring import prepare_drift_frames
 
 from html_report_helper import display_semaphore, show_criteria_semaphore
 
+logger = logging.getLogger(__name__)
+
 
 # =============================================================================
 # ФУНКЦИИ ФОРМИРОВАНИЯ ОТЧЕТОВ
@@ -254,7 +256,7 @@ def main(
     config = Config()
     embedding_model = GigaEmbed(**config.contour_configs)
 
-    logging.info("Тест на глобальный дрифт запущен")
+    logger.info("Тест на глобальный дрифт запущен")
     res = valtest_global_drift_stability(
         sampler=sampler,
         scorer=scorer,
