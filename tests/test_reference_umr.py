@@ -178,6 +178,37 @@ def test_small_basket_returns_structured_not_computable(mode, monkeypatch):
     assert result["all_results"]["reason_code"] == "insufficient_reference_units"
 
 
+def test_not_computable_metric_skips_drift_computation(monkeypatch):
+    import main as drift
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("Вычислительный путь не должен запускаться")
+
+    monkeypatch.setattr(drift, "prepare_drift_frames", forbidden)
+    monkeypatch.setattr(drift, "Config", forbidden)
+    monkeypatch.setattr(drift, "GigaEmbed", forbidden)
+    monkeypatch.setattr(drift, "valtest_global_drift_stability", forbidden)
+
+    result = drift.main(
+        object(),
+        object(),
+        {
+            "contract_version": "laim-monitoring-metric.v2",
+            "umr_version": "laim-umr.v2",
+            "status": "not_computable",
+            "reason_code": "ambiguous_baseline",
+            "reason": "baseline нельзя определить однозначно",
+        },
+    )
+
+    light = result["all_results"]
+    assert light["color"] == "gray"
+    assert light["status"] == "not_computable"
+    assert light["reason_code"] == "ambiguous_baseline"
+    assert light["reason"] == "baseline нельзя определить однозначно"
+    assert light["test_name"] == "global_drift"
+
+
 @pytest.mark.parametrize("mode", ["turn_with_history", "dialogue"])
 def test_no_significant_features_returns_structured_reason(mode, monkeypatch):
     import main as drift
