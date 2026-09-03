@@ -69,7 +69,7 @@ laim-kriteria-selector.validated_monitoring_metric ► monitoring_metric
 ## Как проходит прогон
 
 ```text
-1. Контракт     validate_monitoring_metric(require_computed=False); нет assessment_mode → ошибка
+1. Контракт     validate_monitoring_metric; not_computable → серый без чтения UMR
 2. Единицы      normalize_umr + _unitize обоих UMR; question/target по assessment_mode; NaN main_metric отброшен
 3. Серые гейты  n_oot == 0 → no_scored_monitoring_units; n_oos < 2*n_chunks-1 → insufficient_reference_units
 4. Разбиение    OOS → OOSbase / OOSadd (50/50, random_state); адаптивный n_chunks; OOSadd → n_chunks чанков
@@ -83,6 +83,10 @@ laim-kriteria-selector.validated_monitoring_metric ► monitoring_metric
                 и гейту по OOS (0.4 / 0.6), худший из двух
 9. Публикация   all_results (yellow → amber) + HTML в test_description
 ```
+
+При входном `monitoring_metric.status: not_computable` нода сразу возвращает
+серый результат с исходными `reason_code` и `reason`: UMR, GigaChat и RidgeCV
+не используются.
 
 Пример лога успешного прогона (формат строк — из кода; значения условные):
 
@@ -148,7 +152,7 @@ WARNING giga_wraper: GigaEmbed: лимит токенов — разбиваю 1
 
 | Причина | Исключение |
 |---|---|
-| Контракт не `laim-monitoring-metric.v2`/`v1`, `umr_version` не `laim-umr.v2`, нет `assessment_mode`, `score_column` не `main_metric` | `MonitoringContractError` |
+| Контракт не `laim-monitoring-metric.v2`/`v1`, `umr_version` не `laim-umr.v2`, в вычислимом контракте нет `assessment_mode`, `score_column` не `main_metric` | `MonitoringContractError` |
 | UMR пуст; flat UMR с пустым `query_id`; flat и `dialogue` одновременно; нет ни `query_id`/`input_query`/`output_answer`, ни `dialogue`; контекстный режим без `session_id`; turn не из трёх элементов | `MonitoringContractError` |
 | Нет колонки `main_metric` в эталоне или мониторинге; `main_metric` не константен внутри сессии | `MonitoringContractError` |
 | `n_chunks < 5` | `ValueError` |
@@ -159,6 +163,7 @@ WARNING giga_wraper: GigaEmbed: лимит токенов — разбиваю 1
 
 | Событие | Реакция |
 |---|---|
+| Входной `monitoring_metric.status: not_computable` | `gray`, исходные `reason_code`/`reason`, вычислительный путь пропущен |
 | Ни одной единицы мониторинга с числовым `main_metric` | `gray`, `not_computable`, `no_scored_monitoring_units` |
 | `n_oos < 2 * n_chunks - 1` (19 при `n_chunks = 10`) | `gray`, `not_computable`, `insufficient_reference_units`, в `reason` — `n_oos` и порог |
 | Все признаки константны (эмбеддинги одинаковы) | цвет по факту, `status: computed`, `reason_code: no_significant_features`, регрессия пропущена |
