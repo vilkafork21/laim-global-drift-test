@@ -248,9 +248,12 @@ def test_no_significant_features_returns_structured_reason(mode, monkeypatch):
 
     result = drift.main(reference, monitoring, _contract(mode), n_chunks=5)
 
-    assert result["all_results"]["color"] == "amber"
-    assert result["all_results"]["status"] == "computed"
-    assert result["all_results"]["reason_code"] == "no_significant_features"
+    # Карточка 6.3.8: без истории размеченных периодов прогноз не оценивается;
+    # диагностика публикуется, цвет по среднему судьи не выставляется.
+    assert result["all_results"]["color"] == "gray"
+    assert result["all_results"]["status"] == "not_computable"
+    assert result["all_results"]["reason_code"] == "no_labeled_history"
+    assert result["all_results"]["informative"] is True
     assert result["all_results"]["reason"]
     assert result["all_results"]["n_oos"] == 10
     assert result["all_results"]["n_oot"] == 4
