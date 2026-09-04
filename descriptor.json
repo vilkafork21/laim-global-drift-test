@@ -163,7 +163,7 @@
       "in": false,
       "type": "default",
       "shape": "shape_model",
-      "description": "Результаты прохождения теста",
+      "description": "Результаты прохождения теста; экспериментальный тест 6.3.8: без истории размеченных периодов всегда not_computable/no_labeled_history, informative=true; диагностика (metric_value_*, drift_metric_value_estimate, selected_features) как информация",
       "order": 4
     },
     {

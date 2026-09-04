@@ -307,11 +307,32 @@ def main(
     if pre.get("metric_value_estimate") is not None and not pd.isna(pre["metric_value_estimate"]):
         pre["metric_value_estimate"] = round(pre["metric_value_estimate"], 3)
 
-    semaphore_color = res["report"]["semaphore"]
-    semaphore_title = _SEMAPHORE_TITLE[semaphore_color]
+    # Карточка 6.3.8: прогноз влияния сдвига экспериментален и без истории
+    # размеченных периодов не оценивается; цвет по среднему оценок судьи
+    # (дубль km-теста) не выставляется. Диагностика публикуется как информация.
+    res["report"]["semaphore"] = "gray"
+    if pre.get("status") != "not_computable":
+        # Расчёт прошёл, но вердикт не выставляется; более ранние отказы
+        # (мало единиц) сохраняют свою причину.
+        pre.update(
+            status="not_computable",
+            reason_code="no_labeled_history",
+            reason=(
+                "Экспериментальный прогноз влияния сдвига: нет истории размеченных "
+                "периодов для проверки точности прогноза, результат не оценивается"
+            ),
+        )
+    semaphore_title = _SEMAPHORE_TITLE["gray"]
 
     report_result = report_valtest_global_drift(res, semaphore_title)
-    report_result["all_results"]["test_name"] = "global_drift"
+    report_result["all_results"].update(
+        test_name="global_drift",
+        informative=True,
+        drift_metric_value_estimate=(
+            None if pd.isna(pre.get("drift_metric_value_estimate", float("nan")))
+            else pre.get("drift_metric_value_estimate")
+        ),
+    )
     return {
         "all_results": report_result["all_results"],
         "test_description": report_result["hidden_port"],
