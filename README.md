@@ -1,5 +1,15 @@
 # laim-global-drift-test
 
+## Контракт research-dev v3
+
+Нода принимает только подтверждённое определение измерения. Reference и monitoring
+проверяются по `definition_id` и `dataset_role` до построения drift-фреймов.
+Переход v2 → v3 не автоматический: требуется согласованный комплект нод.
+Математический смысл и ограничения алгоритма ниже не переоценивались этим переносом;
+общий статистический и нагрузочный допуск остаётся отдельным этапом исследования.
+
+Обязателен `assessment_result` v2: допущенный судья, назначение monitoring и тот же прогон (`run_id` ↔ `assessment_run_id`). Оценки недопущенного судьи не используются.
+
 Нода мониторингового контура LAIM: тест на глобальный дрифт запросов. Принимает
 эталонную корзину (`reference_umr`), размеченный автоассессором мониторинг
 (`monitoring_umr` с `main_metric`) и валидированный контракт метрики
@@ -56,7 +66,7 @@ laim-kriteria-selector.validated_monitoring_metric ► monitoring_metric
 |---|---|---|
 | `reference_umr` | dataframe | Корзина в формате тестового датасета (`laim-umr.v2`): flat или packed `dialogue`, с колонкой `main_metric` |
 | `monitoring_umr` | dataframe | `scored_data` автоассессора: flat UMR с обязательной колонкой `main_metric` (оценка судьи, `NaN` — отказ); принимается также parquet bytes или путь к parquet |
-| `monitoring_metric` | default | Контракт `laim-monitoring-metric.v2` (`umr_version: laim-umr.v2`); `assessment_mode` обязателен — по нему определяется единица наблюдения |
+| `monitoring_metric` | default | Контракт `laim-monitoring-metric.v3` (`umr_version: laim-umr.v2`); `assessment_mode` обязателен — по нему определяется единица наблюдения |
 
 ### Выходы
 
@@ -165,7 +175,7 @@ WARNING giga_wraper: GigaEmbed: лимит токенов — разбиваю 1
 
 | Причина | Исключение |
 |---|---|
-| Контракт не `laim-monitoring-metric.v2`/`v1`, `umr_version` не `laim-umr.v2`, в вычислимом контракте нет `assessment_mode`, `score_column` не `main_metric` | `MonitoringContractError` |
+| Контракт не `laim-monitoring-metric.v3`/`v1`, `umr_version` не `laim-umr.v2`, в вычислимом контракте нет `assessment_mode`, `score_column` не `main_metric` | `MonitoringContractError` |
 | UMR пуст; flat UMR с пустым `query_id`; flat и `dialogue` одновременно; нет ни `query_id`/`input_query`/`output_answer`, ни `dialogue`; контекстный режим без `session_id`; turn не из трёх элементов | `MonitoringContractError` |
 | Нет колонки `main_metric` в эталоне или мониторинге; `main_metric` не константен внутри сессии | `MonitoringContractError` |
 | `n_chunks < 5` | `ValueError` |
@@ -274,3 +284,5 @@ tests/                                    гейты, contract dialogue/turn_wit
 - **КМ / `main_metric`** — ключевая метрика качества; в дрифт-фрейме — колонка
   `target`, среднее по ней и есть значение КМ.
 - **Гейт по OOS** — цвет самой КМ на корзине с порогами 0.4/0.6 (см. «Форматы выхода»).
+
+Результат расчёта сохраняет `definition_id` и `run_id` оценивания для проверки принадлежности в агрегаторе.

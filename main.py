@@ -213,6 +213,7 @@ def main(
     reference_umr: pd.DataFrame,
     monitoring_umr: pd.DataFrame,
     monitoring_metric: dict,
+    assessment_result: dict | None = None,
     n_chunks: int = MIN_CHUNKS,
     p_value: float = 0.05,
     corr_threshold: float = 0.3,
@@ -236,6 +237,20 @@ def main(
     - Удалены устаревшие `top_distance_features` (заменены фиксированным набором scale-aware фичей в valtest)
     """
     contract = validate_monitoring_metric(monitoring_metric, require_computed=False)
+    if contract["status"] == "computed":
+        assessment = assessment_result if isinstance(assessment_result, dict) else {}
+        calibration = assessment.get("calibration_metrics") or {}
+        run_id = assessment.get("run_id")
+        run_ids = monitoring_umr.get("assessment_run_id") if isinstance(monitoring_umr, pd.DataFrame) else None
+        if (assessment.get("contract_version") != "laim-assessment-result.v2"
+                or assessment.get("definition_id") != contract["definition_id"]
+                or assessment.get("purpose") != "monitoring"
+                or assessment.get("status") != "computed"
+                or calibration.get("admission_status") not in ("green", "amber")
+                or not isinstance(run_id, str) or not run_id
+                or run_ids is None or not run_ids.eq(run_id).all()):
+            contract = {**contract, "status": "not_computable", "reason_code": "judge_not_admitted",
+                        "reason": "Нет допуска судьи для мониторинга по этому определению КМ"}
     if contract["status"] == "not_computable":
         logger.warning(
             "Глобальный дрифт не вычисляется: %s",
@@ -327,6 +342,8 @@ def main(
     report_result = report_valtest_global_drift(res, semaphore_title)
     report_result["all_results"].update(
         test_name="global_drift",
+        definition_id=contract["definition_id"],
+        run_id=assessment["run_id"],
         informative=True,
         drift_metric_value_estimate=(
             None if pd.isna(pre.get("drift_metric_value_estimate", float("nan")))

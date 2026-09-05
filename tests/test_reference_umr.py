@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from measurement_fixture import reviewed_metric
+
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,8 +16,8 @@ from laim_monitoring import MonitoringContractError, unitize
 
 
 def _contract(mode: str) -> dict:
-    return {
-        "contract_version": "laim-monitoring-metric.v2", "umr_version": "laim-umr.v2",
+    return reviewed_metric({
+        "contract_version": "laim-monitoring-metric.v3", "umr_version": "laim-umr.v2",
         "status": "computed", "basket_id": "CI1", "name": "quality", "score_column": "main_metric",
         "assessment_mode": mode,
         "scoring": {
@@ -37,7 +39,7 @@ def _contract(mode: str) -> dict:
             "affects_monitoring": False,
         },
         "evidence": {},
-    }
+    })
 
 
 def test_packed_dialogue_reference_is_unitized_per_session():
@@ -99,7 +101,7 @@ def test_drift_frames_from_packed_reference_and_scored_dialogue():
         "main_metric": [1.0, 0.0, 0.0],
     })
 
-    ref_frame, mon_frame = prepare_drift_frames(reference, monitoring, contract)
+    ref_frame, mon_frame = prepare_drift_frames(reference.assign(definition_id=contract["definition_id"], dataset_role="reference"), monitoring.assign(definition_id=contract["definition_id"], dataset_role="monitoring", assessment_run_id="test-run"), contract)
 
     assert len(ref_frame) == 2  # единица drift — диалог
     assert len(mon_frame) == 2
@@ -132,7 +134,7 @@ def test_drift_frames_from_flat_monitoring_with_session_id():
         "main_metric": [1.0, 0.0],
     })
 
-    ref_frame, mon_frame = prepare_drift_frames(reference, monitoring, contract)
+    ref_frame, mon_frame = prepare_drift_frames(reference.assign(definition_id=contract["definition_id"], dataset_role="reference"), monitoring.assign(definition_id=contract["definition_id"], dataset_role="monitoring", assessment_run_id="test-run"), contract)
 
     assert len(ref_frame) == 2
     assert len(mon_frame) == 2
@@ -171,7 +173,7 @@ def test_small_basket_returns_structured_not_computable(mode, monkeypatch):
     )
     monkeypatch.setattr(drift, "GigaEmbed", lambda **_kwargs: object())
 
-    result = drift.main(reference, monitoring, _contract(mode), n_chunks=5)
+    result = drift.main(reference.assign(definition_id=_contract(mode)["definition_id"], dataset_role="reference"), monitoring.assign(definition_id=_contract(mode)["definition_id"], dataset_role="monitoring", assessment_run_id="test-run"), _contract(mode), n_chunks=5, assessment_result={"contract_version": "laim-assessment-result.v2", "definition_id": _contract(mode)["definition_id"], "purpose": "monitoring", "run_id": "test-run", "status": "computed", "calibration_metrics": {"admission_status": "green"}})
 
     assert result["all_results"]["color"] == "gray"
     assert result["all_results"]["status"] == "not_computable"
@@ -193,7 +195,7 @@ def test_not_computable_metric_skips_drift_computation(monkeypatch):
         object(),
         object(),
         {
-            "contract_version": "laim-monitoring-metric.v2",
+            "contract_version": "laim-monitoring-metric.v3",
             "umr_version": "laim-umr.v2",
             "status": "not_computable",
             "reason_code": "ambiguous_baseline",
@@ -246,7 +248,7 @@ def test_no_significant_features_returns_structured_reason(mode, monkeypatch):
         drift, "GigaEmbed", lambda **_kwargs: ConstantEmbedding()
     )
 
-    result = drift.main(reference, monitoring, _contract(mode), n_chunks=5)
+    result = drift.main(reference.assign(definition_id=_contract(mode)["definition_id"], dataset_role="reference"), monitoring.assign(definition_id=_contract(mode)["definition_id"], dataset_role="monitoring", assessment_run_id="test-run"), _contract(mode), n_chunks=5, assessment_result={"contract_version": "laim-assessment-result.v2", "definition_id": _contract(mode)["definition_id"], "purpose": "monitoring", "run_id": "test-run", "status": "computed", "calibration_metrics": {"admission_status": "green"}})
 
     # Карточка 6.3.8: без истории размеченных периодов прогноз не оценивается;
     # диагностика публикуется, цвет по среднему судьи не выставляется.
@@ -273,3 +275,28 @@ def test_descriptor_requires_assessor_scored_data():
     assert "scored_data" in monitoring_port["description"]
     assert "main_metric" in monitoring_port["description"]
     assert "parquet_test_dataset" not in monitoring_port["description"]
+
+
+@pytest.mark.parametrize("admission", ["red", "not_assessed", None])
+def test_global_drift_does_not_use_an_unadmitted_judge(admission, monkeypatch):
+    import main as drift
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Drift не должен запускаться без допуска судьи")
+    monkeypatch.setattr(drift, "prepare_drift_frames", forbidden)
+    contract = _contract("qa")
+    result = drift.main(pd.DataFrame(), pd.DataFrame(), contract, assessment_result={
+        "contract_version": "laim-assessment-result.v2", "definition_id": contract["definition_id"],
+        "purpose": "monitoring", "run_id": "test-run", "status": "computed",
+        "calibration_metrics": {"admission_status": admission},
+    })["all_results"]
+    assert result["status"] == "not_computable"
+    assert result["reason_code"] == "judge_not_admitted"
+
+
+def test_drift_cannot_compare_data_from_another_definition():
+    from laim_monitoring import prepare_drift_frames
+    contract = _contract("qa")
+    reference = pd.DataFrame({"definition_id": ["1" * 64], "dataset_role": ["reference"]})
+    monitoring = pd.DataFrame({"definition_id": [contract["definition_id"]], "dataset_role": ["monitoring"]})
+    with pytest.raises(MonitoringContractError, match="definition_id"):
+        prepare_drift_frames(reference, monitoring, contract)

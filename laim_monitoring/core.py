@@ -2,28 +2,17 @@
 
 from __future__ import annotations
 
+from measurement import MeasurementError, validate_measurement
+
 import ast
 import json
-from copy import deepcopy
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from pathlib import Path
 
 import pandas as pd
 
-_VERSION = "laim-monitoring-metric.v2"
-_LEGACY_VERSION = "laim-monitoring-metric.v1"
-_UMR_VERSION = "laim-umr.v2"
 _ASSESSMENT_MODES = {"qa", "turn_with_history", "dialogue"}
-_METHOD_ROLES = {
-    "identity": {"final_score": (1, 1)},
-    "accuracy": {"prediction": (1, 1), "target": (1, 1)},
-    "mean_criteria": {"criterion": (1, None)},
-    "all_criteria": {"criterion": (1, None)},
-    "majority": {"assessor_vote": (1, None)},
-    "all_assessors": {"assessor_vote": (2, None)},
-}
-_MISSING = {"fail", "exclude_unit", "exclude_value", "zero"}
 
 
 class MonitoringContractError(ValueError):
@@ -49,103 +38,13 @@ def _decimal(value: object, name: str = "value") -> Decimal:
     return result
 
 
-def _upgrade_contract(payload: dict) -> dict:
-    version = payload.get("contract_version")
-    if version == _VERSION:
-        return deepcopy(payload)
-    if version != _LEGACY_VERSION:
-        raise MonitoringContractError(
-            f"Неизвестная версия monitoring_metric: {version!r}"
-        )
-    if payload.get("status") == "computed" and payload.get("evaluation_unit") != "turn":
-        raise MonitoringContractError(
-            "monitoring_metric.v1 dialogue нельзя восстановить без turn_index"
-        )
-    upgraded = deepcopy(payload)
-    upgraded["contract_version"] = _VERSION
-    upgraded["umr_version"] = _UMR_VERSION
-    upgraded["assessment_mode"] = "qa"
-    upgraded["status"] = (
-        "not_computable" if upgraded.get("status") == "not_evaluable" else upgraded.get("status")
-    )
-    upgraded.pop("evaluation_unit", None)
-    upgraded.pop("group_column", None)
-    return upgraded
-
-
 def validate_monitoring_metric(payload: object, *, require_computed: bool = True) -> dict:
     if not isinstance(payload, dict):
         raise MonitoringContractError("monitoring_metric должен быть JSON object")
-    contract = _upgrade_contract(payload)
-    if _require(contract, "umr_version") != _UMR_VERSION:
-        raise MonitoringContractError(f"Неизвестная версия UMR: {contract.get('umr_version')!r}")
-    status = _require(contract, "status", {"computed", "not_computable"})
-    if status != "computed":
-        if require_computed:
-            raise MonitoringContractError(
-                f"monitoring_metric невычислим: {contract.get('reason', 'причина не указана')}"
-            )
-        return contract
-
-    _require(contract, "basket_id")
-    _require(contract, "name")
-    if _require(contract, "score_column") != "main_metric":
-        raise MonitoringContractError("Единственная каноническая score-колонка: main_metric")
-    _require(contract, "assessment_mode", _ASSESSMENT_MODES)
-
-    scoring = _require(contract, "scoring")
-    if not isinstance(scoring, dict):
-        raise MonitoringContractError("scoring должен быть object")
-    method = _require(scoring, "method", set(_METHOD_ROLES))
-    sources = _require(scoring, "sources")
-    if not isinstance(sources, list) or not sources:
-        raise MonitoringContractError("scoring.sources должен быть непустым списком")
-    source_ids = set()
-    role_counts: dict[str, int] = {}
-    for source in sources:
-        if not isinstance(source, dict):
-            raise MonitoringContractError("Каждый scoring source должен быть object")
-        source_id = _require(source, "source_id")
-        if source_id in source_ids:
-            raise MonitoringContractError(f"Повторяется source_id: {source_id}")
-        source_ids.add(source_id)
-        _require(source, "column_name")
-        role = _require(source, "role")
-        role_counts[role] = role_counts.get(role, 0) + 1
-        normalization = _require(source, "normalization")
-        if not isinstance(normalization, dict) and normalization not in {"numeric", "label"}:
-            raise MonitoringContractError(f"Недопустимая normalization у {source_id}")
-        _require(source, "polarity", {"direct", "inverted"})
-    expected_roles = _METHOD_ROLES[method]
-    if set(role_counts) != set(expected_roles):
-        raise MonitoringContractError(
-            f"Метод {method} требует роли {sorted(expected_roles)}, получено {sorted(role_counts)}"
-        )
-    for role, (minimum, maximum) in expected_roles.items():
-        count = role_counts[role]
-        if count < minimum or (maximum is not None and count > maximum):
-            raise MonitoringContractError(f"Недопустимое число источников роли {role}: {count}")
-    _require(scoring, "missing_policy", _MISSING)
-    denominator = scoring.get("majority_denominator")
-    if method == "majority" and denominator not in {"declared", "present"}:
-        raise MonitoringContractError("majority требует denominator declared или present")
-    if method != "majority" and denominator is not None:
-        raise MonitoringContractError("majority_denominator допустим только для majority")
-    aggregation = _require(contract, "aggregation")
-    reducer = _require(aggregation, "method", {"mean", "frequency_weighted_mean"})
-    weight_column = aggregation.get("weight_column")
-    if reducer == "frequency_weighted_mean" and weight_column != "input_query_count":
-        raise MonitoringContractError("Weighted mean требует input_query_count")
-    if reducer == "mean" and weight_column is not None:
-        raise MonitoringContractError("mean не должен объявлять weight_column")
-
-    baseline = _require(contract, "baseline")
-    _decimal(_require(baseline, "value"), "baseline.value")
-    _decimal(_require(baseline, "recomputed_value"), "baseline.recomputed_value")
-    _require(baseline, "scale", {"ratio", "raw"})
-    validation = _require(contract, "primary_validation")
-    if validation.get("affects_monitoring") is not False:
-        raise MonitoringContractError("Primary validation threshold не должен влиять на monitoring")
+    try:
+        contract = validate_measurement(payload, require_computed=require_computed)
+    except MeasurementError as exc:
+        raise MonitoringContractError(str(exc)) from exc
     return contract
 
 
@@ -216,7 +115,9 @@ def _ordered_groups(frame: pd.DataFrame) -> list[tuple[object, list[int]]]:
     )
     groups: dict[object, tuple[object, list[tuple[int | None, int]]]] = {}
     for position, (group, raw_index) in enumerate(zip(group_values, order_values)):
-        key = ("solo", position) if _blank(group) else _key(group)
+        key = ("solo", position) if _blank(group) else (
+            ("text", group.strip()) if isinstance(group, str) else _key(group)
+        )
         label = f"row-{position}" if _blank(group) else group
         groups.setdefault(key, (label, []))[1].append((_turn_order(raw_index), position))
     result = []
@@ -509,14 +410,14 @@ def _turn_record(
     return record
 
 
-def _unitize(frame: pd.DataFrame, contract: dict) -> pd.DataFrame:
+def _unitize(frame: pd.DataFrame, contract: dict, *, include_sources: bool = True) -> pd.DataFrame:
     frame = normalize_umr(frame, contract)
     query_label = _unique_labels()
     frame["query_id"] = [
         query_label(value, f"row-{position}")
         for position, value in enumerate(frame["query_id"].tolist())
     ]
-    sources = contract.get("scoring", {}).get("sources", [])
+    sources = contract.get("scoring", {}).get("sources", []) if include_sources else []
     score_column = contract.get("score_column", "main_metric")
     weighted = (
         contract.get("aggregation", {}).get("method")
@@ -574,8 +475,8 @@ def _unitize(frame: pd.DataFrame, contract: dict) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
-def unitize(frame: pd.DataFrame, payload: dict) -> pd.DataFrame:
-    return _unitize(frame, validate_monitoring_metric(payload))
+def unitize(frame: pd.DataFrame, payload: dict, *, include_sources: bool = True) -> pd.DataFrame:
+    return _unitize(frame, validate_monitoring_metric(payload), include_sources=include_sources)
 
 
 def _normalize(value: object, source: dict) -> object | None:
@@ -770,6 +671,13 @@ def prepare_drift_frames(
         )
     # normalize_umr выполнит _unitize внутри _drift_frame — второй проход не нужен
     monitoring_umr = _load_tdc_monitoring(monitoring_umr)
+    for name, data in (("reference", reference_umr), ("monitoring", monitoring_umr)):
+        identities = data.get("definition_id")
+        if identities is None or not identities.eq(contract.get("definition_id")).all():
+            raise MonitoringContractError(f"{name}.definition_id не соответствует определению КМ")
+        roles = data.get("dataset_role")
+        if roles is None or not roles.eq(name).all():
+            raise MonitoringContractError(f"{name}.dataset_role не соответствует назначению данных")
     return (
         _drift_frame(reference_umr, contract, require_target=True),
         _drift_frame(monitoring_umr, contract, require_target=True),
