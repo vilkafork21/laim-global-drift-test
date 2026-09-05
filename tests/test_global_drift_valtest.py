@@ -97,6 +97,8 @@ def test_judge_refusals_do_not_fail_drift_frames():
         "baseline": {"value": 0.9, "scale": "ratio", "recomputed_value": 0.9},
         "primary_validation": {"affects_monitoring": False},
     }
+    from measurement_fixture import reviewed_metric
+    contract = reviewed_metric(contract)
     reference = pd.DataFrame({
         "query_id": ["r1", "r2", "r3"],
         "input_query_count": [1, 1, 1],
@@ -114,9 +116,7 @@ def test_judge_refusals_do_not_fail_drift_frames():
         "main_metric": [1.0, None, 0.0],
     })
 
-    reference_frame, monitoring_frame = prepare_drift_frames(
-        reference, monitoring, contract
-    )
+    reference_frame, monitoring_frame = prepare_drift_frames(reference.assign(definition_id=contract["definition_id"], dataset_role="reference"), monitoring.assign(definition_id=contract["definition_id"], dataset_role="monitoring"), contract)
 
     assert len(reference_frame) == 3
     assert monitoring_frame["target"].tolist() == [1.0, 0.0]

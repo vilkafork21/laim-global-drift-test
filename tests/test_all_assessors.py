@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from measurement_fixture import reviewed_metric
+
 import pandas as pd
 
 from laim_monitoring import score_units, unitize, validate_monitoring_metric
 
 
 def _contract() -> dict:
-    return {
+    return reviewed_metric({
         "contract_version": "laim-monitoring-metric.v2", "umr_version": "laim-umr.v2",
         "status": "computed", "basket_id": "CI1", "name": "quality", "score_column": "main_metric",
         "assessment_mode": "qa",
@@ -32,7 +34,7 @@ def _contract() -> dict:
             "affects_monitoring": False,
         },
         "evidence": {},
-    }
+    })
 
 
 def test_all_assessors_contract_is_accepted_and_scored_as_unanimity():
