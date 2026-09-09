@@ -34,7 +34,9 @@ def test_report_preserves_result_and_explains_color(color):
     assert payload == before
     assert 'class="laim-test-report"' in html
     assert "Тест 6.3.5" in html
-    assert "Цель теста" in html and "Интерпретация результатов" in html
+    assert "Цель теста" in html and "Алгоритм расчёта" in html
+    assert html.index("Критерии выставления светофора") < html.index('<table class="results-table"')
+    assert "<details>" not in html and 'class="test-number"' not in html
     assert '<th scope="col">Показатель</th>' in html
     assert "Результат теста" in html
     assert "<script>" not in html and "&lt;script&gt;" in html

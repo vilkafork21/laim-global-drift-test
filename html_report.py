@@ -1,4 +1,4 @@
-"""Единое представление результатов тестов мониторинга."""
+"""Представление тестов в формате исходного HTML-отчёта."""
 
 from __future__ import annotations
 
@@ -21,74 +21,86 @@ def render_test_report(
     rows: list[tuple[str, str]],
     color: str,
     interpretation: str,
-    conditions: str,
-    criteria: str,
+    conditions: tuple[str, ...],
+    criteria: list[tuple[str, str]],
     *,
+    algorithm: tuple[str, ...],
     reason: str = "",
     chart_html: str = "",
 ) -> str:
-    """HTML-фрагмент отчёта; светофор поступает из расчёта без переоценки."""
+    """HTML-фрагмент; светофор поступает из расчёта без переоценки."""
     from html import escape
 
-    color = {"amber": "yellow", "grey": "gray"}.get(color, color)
-    labels = {"green": "Зелёный · В пределах допуска", "yellow": "Жёлтый · Требует внимания",
-              "red": "Красный · Выявлено отклонение", "gray": "Не оценено · Серый"}
-    label = labels.get(color, "Неизвестный результат")
-    lights = "".join(
-        f'<span class="lamp {lamp if color == lamp else "inactive"}"></span>'
-        for lamp in ("red", "yellow", "green")
-    )
-    status = f'<span class="signal" aria-hidden="true">{lights}</span><strong>{label}</strong>'
+    def signal(value: str) -> str:
+        value = {"amber": "yellow", "grey": "gray"}.get(value, value)
+        labels = {"green": "Зелёный", "yellow": "Жёлтый", "red": "Красный", "gray": "Не оценено"}
+        label = labels.get(value, "Неизвестный результат")
+        lights = "".join(
+            f'<span class="lamp {lamp if value == lamp else "inactive"}"></span>'
+            for lamp in ("red", "yellow", "green")
+        )
+        return f'<span class="signal" role="img" aria-label="{label}" title="{label}">{lights}</span>'
+
     table_rows = "".join(
         f'<tr><th scope="row">{escape(str(key))}</th><td>{escape(str(value))}</td></tr>'
         for key, value in rows
     )
-    reason_html = f'<p class="report-reason">{escape(str(reason))}</p>' if reason else ""
-    return f'''<article class="laim-test-report">
+    criteria_rows = "".join(
+        f'<tr><td>{escape(text)}</td><td>{signal(value)}</td></tr>' for value, text in criteria
+    )
+    steps = "".join(f"<li>{escape(step)}</li>" for step in algorithm)
+    conditions_html = (
+        "<p><b>Условия проведения</b></p><ul>" +
+        "".join(f"<li>{escape(condition)}</li>" for condition in conditions) + "</ul>"
+        if conditions else ""
+    )
+    reason_html = f"<p>{escape(str(reason))}</p>" if reason else ""
+    return f'''<article class="laim-test-report" aria-label="Тест {escape(test_id)}">
 <style>
-.laim-test-report {{box-sizing:border-box;width:100%;max-width:100%;min-width:0;margin:12px 0;padding:0;
-  background:#fff;color:#1f2937;font:13px/1.48 Inter,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+.laim-test-report {{box-sizing:border-box;width:100%;min-width:0;max-width:100%;margin:0;padding:0;
+  background:transparent;color:#1c1c1c;font:14px/1.48 Inter,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
   text-align:left;overflow-wrap:anywhere}}
 .laim-test-report * {{box-sizing:border-box}}
-.laim-test-report .test-number {{font-size:11.5px;color:#64748b;margin:0 0 4px}}
-.laim-test-report h2 {{font-family:inherit;font-size:18px;font-weight:600;line-height:1.4;
-  margin:0 0 12px;color:#111827;letter-spacing:normal}}
-.laim-test-report h3 {{font-size:13px;font-weight:600;margin:14px 0 5px;color:#374151}}
-.laim-test-report p {{margin:5px 0 10px;white-space:normal}}
-.laim-test-report table {{border-collapse:collapse;width:100%;min-width:0;max-width:100%;
-  table-layout:fixed;margin:8px 0 12px;background:#fff}}
-.laim-test-report th,.laim-test-report td {{padding:7px 10px;border:1px solid #ddd;
-  font-family:inherit;font-size:12.75px !important;line-height:1.48;font-weight:400 !important;
+.laim-test-report h2 {{font-family:inherit;font-size:18px;font-weight:680;line-height:1.48;
+  text-align:center;margin:28px 0 5px;color:#111827;letter-spacing:-.01em}}
+.laim-test-report p {{font-size:14px;line-height:1.48;margin:14px 0;white-space:normal}}
+.laim-test-report ol,.laim-test-report ul {{margin:14px 0 14px 20px;padding:0 0 0 20px}}
+.laim-test-report li {{margin:0;padding:0}}
+.laim-test-report table {{border-collapse:collapse;width:100%;min-width:0;max-width:100%;table-layout:fixed;
+  margin:10px 0;border:1px solid #ddd;background:#fff}}
+.laim-test-report th,.laim-test-report td {{font-family:inherit;font-size:12.75px !important;
+  line-height:1.48;font-weight:400 !important;padding:5px;border:1px solid #ddd;
   text-align:left;vertical-align:top;white-space:normal;overflow-wrap:anywhere;word-break:normal;
-  color:#1f2937;background:#fff;letter-spacing:normal}}
-.laim-test-report thead th {{background:#f5f5f5;font-weight:600 !important;position:static}}
-.laim-test-report th:first-child {{width:58%}}
-.laim-test-report td {{font-variant-numeric:tabular-nums;color:#1f2937}}
+  color:#1f2937;background:transparent;letter-spacing:normal}}
+.laim-test-report thead th {{font-size:18.2px !important;font-weight:700 !important;text-align:center;
+  background:#f5f5f5;color:#64748b;position:static}}
 .laim-test-report tbody tr {{background:#fff}}
-.laim-test-report .result-row th,.laim-test-report .result-row td {{background:#fafafa}}
-.laim-test-report .signal {{display:inline-flex;gap:3px;vertical-align:middle;margin:0 7px 0 0;
-  padding:0;border:0;border-radius:0;background:transparent;box-shadow:none}}
-.laim-test-report .lamp {{width:8px;height:8px;border-radius:50%;display:block}}
-.laim-test-report .red {{background:#b83c3c}} .laim-test-report .yellow {{background:#d69c1b}}
-.laim-test-report .green {{background:#23825b}} .laim-test-report .inactive {{background:#ddd}}
-.laim-test-report .report-reason {{color:#475569}}
-.laim-test-report details {{border:0;border-radius:0;box-shadow:none;margin:12px 0 0;padding:0;background:#fff}}
-.laim-test-report summary {{cursor:pointer;color:#475569;font-size:12px;font-weight:400}}
-.laim-test-report summary:focus-visible {{outline:2px solid #334e60;outline-offset:4px}}
+.laim-test-report tbody tr:nth-child(even) {{background:#f9f9f9}}
+.laim-test-report .results-table th:first-child {{width:58%}}
+.laim-test-report .criteria-table th:first-child {{width:74%}}
+.laim-test-report td {{font-variant-numeric:tabular-nums}}
+.laim-test-report .signal {{display:inline-flex;gap:5px;align-items:center;vertical-align:middle;
+  margin:0;padding:5px 10px;border:2px solid #ccc;border-radius:100px;background:transparent;box-shadow:none}}
+.laim-test-report .lamp {{display:block;width:10px;height:10px;border-radius:50%}}
+.laim-test-report .red {{background:#ca1d1d}} .laim-test-report .yellow {{background:#ffd600}}
+.laim-test-report .green {{background:#04d930}} .laim-test-report .inactive {{background:#ccc}}
+.laim-test-report .interpretation {{font-size:12.75px}}
 .laim-test-report img {{max-width:100%;height:auto}}
-@media(max-width:600px) {{.laim-test-report th,.laim-test-report td {{padding:6px 7px}}}}
+@media(max-width:600px) {{.laim-test-report .criteria-table th:first-child {{width:68%}}}}
 @media print {{.laim-test-report tr {{break-inside:avoid}}}}
 </style>
-<p class="test-number">Тест {escape(test_id)} · Этап 4. Контроль качества при эксплуатации</p>
 <h2>{escape(title)}</h2>
-<h3>Цель теста</h3><p>{escape(purpose)}</p>
-<h3>Результаты теста</h3>
-<table aria-label="Результаты теста {escape(test_id)}"><thead><tr><th scope="col">Показатель</th>
-<th scope="col">Значение</th></tr></thead><tbody>{table_rows}
-<tr class="result-row"><th scope="row">Результат теста</th><td>{status}</td></tr></tbody></table>
-{reason_html}<h3>Интерпретация результатов</h3><p>{escape(interpretation)}</p>
-{chart_html}
-<details><summary>Условия проведения и критерии оценки</summary>
-<h3>Условия проведения</h3><p>{escape(conditions)}</p>
-<h3>Критерии выставления светофора</h3><p>{escape(criteria)}</p></details>
+<p><b>Цель теста</b></p><p>{escape(purpose)}</p>
+{conditions_html}
+<p><b>Алгоритм расчёта</b></p><ol>{steps}</ol>
+<p><b>Критерии выставления светофора</b></p>
+<table class="criteria-table" aria-label="Критерии теста {escape(test_id)}">
+<thead><tr><th scope="col">Критерий</th><th scope="col">Результат</th></tr></thead>
+<tbody>{criteria_rows}</tbody></table><br>
+<p><b>Результаты теста</b></p>
+<table class="results-table" aria-label="Результаты теста {escape(test_id)}">
+<thead><tr><th scope="col">Показатель</th><th scope="col">Значение</th></tr></thead>
+<tbody>{table_rows}<tr><th scope="row">Результат теста</th><td>{signal(color)}</td></tr></tbody></table><br>
+{reason_html}{chart_html}
+<p class="interpretation">{escape(interpretation)}</p>
 </article>'''
