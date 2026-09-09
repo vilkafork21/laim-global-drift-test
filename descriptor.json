@@ -15,13 +15,6 @@
             "config": {
               "components": [
                 {
-                  "parameter": "n_chunks",
-                  "label": "Число подвыборок (минимум 5)",
-                  "uiComponent": "input",
-                  "type": "integer",
-                  "defaultValue": 10
-                },
-                {
                   "parameter": "p_value",
                   "label": "Порог p-value (FDR Бенджамини—Хохберга)",
                   "uiComponent": "input",
@@ -153,7 +146,7 @@
       "in": true,
       "type": "dataframe",
       "shape": "shape_dataframe",
-      "description": "Выход scored_data автоассессора с обязательным main_metric; QA/dialogue нормализуется внутри Drift",
+      "description": "Запросы мониторинга UMR; оценки main_metric за период не требуются",
       "required": true,
       "order": 2
     },
@@ -197,6 +190,7 @@
       "sourceFiles": [
         "main.py",
         "html_report_helper.py",
+        "html_report.py",
         "config.py",
         "giga_wraper.py",
         "llm_val/report_helper.py",

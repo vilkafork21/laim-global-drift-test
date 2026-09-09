@@ -569,7 +569,16 @@ def _unitize(frame: pd.DataFrame, contract: dict) -> pd.DataFrame:
                     part[column].tolist(), column
                 )
         if score_column in part:
-            record[score_column] = _constant(part[score_column].tolist(), score_column)
+            values = pd.to_numeric(part[score_column], errors="coerce")
+            policy = contract.get("scoring", {}).get("missing_policy", "exclude_value")
+            if values.isna().any() and policy == "fail":
+                raise MonitoringContractError("Пустой main_metric внутри dialogue при missing_policy=fail")
+            if policy == "zero":
+                values = values.fillna(0)
+            if policy == "exclude_unit" and values.isna().any():
+                record[score_column] = None
+            else:
+                record[score_column] = values.mean() if values.notna().any() else None
         records.append(record)
     return pd.DataFrame(records)
 
@@ -707,6 +716,12 @@ def broadcast_scores(frame: pd.DataFrame, units: pd.DataFrame, scores: pd.Series
 
 
 def _drift_frame(frame: pd.DataFrame, contract: dict, *, require_target: bool) -> pd.DataFrame:
+    if isinstance(frame, pd.DataFrame) and frame.empty:
+        return pd.DataFrame(columns=["question", "answer", "target", "reference_group_id"])
+    if not require_target:
+        frame = frame.drop(columns=["main_metric"], errors="ignore")
+    contract = dict(contract, scoring=dict(contract.get("scoring", {}), sources=[]), score_column="main_metric",
+                    aggregation={"method": "mean"})
     units = _unitize(frame, contract)
     if require_target and "main_metric" not in units:
         raise MonitoringContractError("Для drift отсутствует main_metric")
@@ -772,7 +787,7 @@ def prepare_drift_frames(
     monitoring_umr = _load_tdc_monitoring(monitoring_umr)
     return (
         _drift_frame(reference_umr, contract, require_target=True),
-        _drift_frame(monitoring_umr, contract, require_target=True),
+        _drift_frame(monitoring_umr, contract, require_target=False),
     )
 
 

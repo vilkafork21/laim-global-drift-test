@@ -3,6 +3,7 @@
 """
 
 import logging
+import math
 from ast import literal_eval
 
 import pandas as pd
@@ -18,141 +19,53 @@ from llm_val.valtest_global_drift_stability import (
 )
 from laim_monitoring import prepare_drift_frames
 
-from html_report_helper import display_semaphore, show_criteria_semaphore
+from html_report import format_report_number, render_test_report
 
 
 # =============================================================================
 # ФУНКЦИИ ФОРМИРОВАНИЯ ОТЧЕТОВ
 # =============================================================================
 
-def _table_styles():
-    return [
-        {"selector": "th", "props": [
-            ("background-color", "#f5f5f5"),
-            ("text-align", "center"),
-            ("border", "1px solid #ddd"),
-            ("padding", "5px"),
-        ]},
-        {"selector": "td", "props": [
-            ("text-align", "left"),
-            ("border", "1px solid #ddd"),
-            ("padding", "5px"),
-        ]},
-        {"selector": "", "props": [
-            ("border-collapse", "collapse"),
-            ("border", "1px solid black"),
-        ]},
-    ]
 
 
-def html_report_valtest_global_drift(res, semaphore_title):
-    table_styles = _table_styles()
 
-    green_criterion = (
-        "Абсолютное снижение ключевой метрики менее 15 п.п. "
-        "И светофор OOT — «Зелёный»"
-    )
-    yellow_criterion = "Иначе"
-    red_criterion = (
-        "Абсолютное снижение ключевой метрики качества более 25 п.п. "
-        "ИЛИ светофор OOT — «Красный»"
-    )
-    grey_criterion = (
-        "Нет ни одной оценённой единицы мониторинга "
-        "либо эталон слишком мал для разбиения"
-    )
-
-    criterion_df = show_criteria_semaphore(
-        green_criterion, yellow_criterion, red_criterion, grey_criterion, table_styles
-    )
-    criterion_df_html = criterion_df.to_html(border=0, classes="table")
-
-    semaphore_color = res["report"]["semaphore"]
-    semaphore_html = display_semaphore(semaphore_color, return_html=True)
-
+def html_report_valtest_global_drift(res: dict, semaphore_title: str) -> str:
     pre = res["precomputed"]
-    mv = pre["metric_value"]
-    mve = pre["metric_value_estimate"]
-
-    def _fmt(v):
-        if v is None:
-            return "n/a"
-        try:
-            if pd.isna(v):
-                return "n/a"
-        except (TypeError, ValueError):
-            pass
-        return f"{float(v):.3f}"
-
-    res_df = pd.DataFrame(
-        {
-            "Показатель": [
-                "Значение метрики на валидации",
-                "Оценка метрики на мониторинге",
-                "Абсолютное снижение",
-                "Отобранных фичей",
-                "Результат теста",
-            ],
-            "Значение": [
-                _fmt(mv),
-                _fmt(mve),
-                _fmt(abs(mv - mve)) if (mve is not None and mv is not None and not pd.isna(mve)) else "n/a",
-                str(len(pre.get("selected_features", []))),
-                semaphore_html,
-            ],
-        }
+    baseline, current = pre.get("metric_value"), pre.get("metric_value_estimate")
+    delta = baseline - current if baseline is not None and current is not None else None
+    correlations = pre.get("feature_correlations", {})
+    features = "; ".join(f"{name} ({format_report_number(correlations.get(name))})"
+                         for name in pre.get("selected_features", []))
+    rows = [
+        ("Значение КМ на эталонной корзине (OOS)", format_report_number(baseline)),
+        ("Прогноз КМ по глобальному дрифту (OOT)", format_report_number(current)),
+        ("Источник прогноза", "Расстояния между запросами и метки эталонной корзины"),
+        ("Абсолютное снижение D = КМ OOS − КМ OOT", format_report_number(delta)),
+        ("Пороги снижения D (жёлтый / красный)", " / ".join(format_report_number(v) for v in pre.get("semaphore_threshold", (0.15, 0.25)))),
+        ("Отобранные признаки (корреляция Пирсона)", features or "Не отобраны"),
+        ("Число подвыборок OOS add / объектов в подвыборке",
+         f"{format_report_number(pre.get('n_chunks'), 0)} / {format_report_number(pre.get('chunk_size'), 0)}"),
+    ]
+    if pre.get("selection_low_confidence"):
+        rows.append(("Надёжность отбора признаков", "Пониженная: статистическая значимость не подтверждена"))
+    return render_test_report(
+        "6.3.5", "Глобальный дрифт запросов",
+        "Оценить изменение распределения запросов текущего потока относительно эталонной корзины "
+        "и его возможную связь с качеством ответов.",
+        rows, res["report"]["semaphore"],
+        "Это прогноз качества по семантике запросов и оценкам эталонной корзины. "
+        "Ответы решения и оценки Автоасессора за отчётный период в прогнозе не используются. "
+        "Положительное D означает ожидаемое снижение, отрицательное — рост. "
+        "Отсутствие значимых признаков не доказывает ухудшение: в этом случае результат серый.",
+        f"СЗ выше E; не менее 200 объектов OOS и {MIN_CHUNKS} подвыборок не менее чем по 20 объектов. "
+        "Число подвыборок определяется объёмом эталона, максимум 10. Отбор: |r| > 0,3 "
+        "и p < 0,05 / 11 (поправка Бонферрони); прогноз — RidgeCV.",
+        "Пороги по умолчанию: зелёный — D < 0,15 и зелёная КМ на эталоне; красный — "
+        "D ≥ 0,25 или красная КМ на эталоне; иначе жёлтый. Серый: нет значимых признаков, "
+        "недостаточно объектов, невалидные данные или информационный режим.",
+        reason=pre.get("reason") or ("Оценка недоступна или выбран информационный режим."
+                                    if res["report"]["semaphore"] in ("gray", "grey") else ""),
     )
-
-    try:
-        res_df_to_html = res_df.style.hide().set_table_styles(table_styles)
-    except AttributeError:
-        res_df_to_html = res_df.style.hide_index().set_table_styles(table_styles)
-    res_df_html = res_df_to_html.to_html(border=0, classes="table")
-
-    # Таблица отобранных фичей и их корреляций (P2-5)
-    selected = pre.get("selected_features", [])
-    corrs = pre.get("feature_correlations", {})
-    if selected:
-        feat_df = pd.DataFrame(
-            {
-                "Фича": selected,
-                "Корреляция Пирсона": [round(float(corrs.get(name, float('nan'))), 4) for name in selected],
-            }
-        )
-        try:
-            feat_df_html = feat_df.style.hide().set_table_styles(table_styles).to_html(border=0, classes="table")
-        except AttributeError:
-            feat_df_html = feat_df.style.hide_index().set_table_styles(table_styles).to_html(border=0, classes="table")
-    else:
-        feat_df_html = "<p style=\"text-align: left;\">Статистически значимых фичей не обнаружено.</p>"
-
-    html_report = f"""
-<h2 style="text-align: center;">Тест на глобальный drift запросов</h2>
-<p style="text-align: left;"><b>Цель теста</b></p>
-<p style="text-align: left;">Оценить ключевую метрику качества агента исходя из степени изменения запросов к ней.</p>
-<p style="text-align: left;"><b>Условия проведения</b></p>
-<ul style="text-align: left; margin-left: 20px; padding-left: 20px;">
-    <li>Тест применяется только при наличии достаточного количества данных в OOS.</li>
-    <li>Минимум {MIN_CHUNKS} подвыборок OOSadd для статистической значимости.</li>
-</ul>
-<p style="text-align: left;"><b>Алгоритм расчёта</b></p>
-<ol style="text-align: left; margin-left: 20px; padding-left: 20px;">
-    <li>OOS делится на OOSbase и OOSadd поровну.</li>
-    <li>Из OOSadd выделяются n_chunks подвыборок OOSadd_i.</li>
-    <li>Между эмбеддингами OOSadd_i и OOSbase считаются cosine_distances.</li>
-    <li>Для каждой OOSadd_i извлекаются 11 scale-aware фичей: перцентили (q25/q50/q75/q95), mean, std матрицы D и аналогичные статистики per-query средних ADi (q50/q75/q95, mean, std).</li>
-    <li>Отбор фичей: Пирсон-корреляция с поправкой Бенджамини—Хохберга (FDR); при пустом отборе — top-K по |r| с пометкой низкой значимости.</li>
-    <li>Обучается RidgeCV: features → метрика.</li>
-    <li>Эмбеддинги OOT нарезаются на чанки того же размера → предсказание метрики чанк-за-чанком → усреднение.</li>
-</ol>
-<p style="text-align: left;"><b>Критерии выставления светофора</b></p>
-<div style="text-align: left; width: 100%;">{criterion_df_html}</div><br>
-<p style="text-align: left;"><b>Результаты теста</b></p>
-<div style="text-align: left; width: 100%;">{res_df_html}</div><br>
-<p style="text-align: left;"><b>Отобранные фичи</b></p>
-<div style="text-align: left; width: 100%;">{feat_df_html}</div><br>
-"""
-    return html_report
 
 
 # Цвет, отдаваемый ПЛАТФОРМЕ и АГРЕГАТОРУ, должен быть в их словаре
@@ -167,6 +80,10 @@ def report_valtest_global_drift(res, semaphore_title):
     platform_color = _PLATFORM_COLOR.get(semaphore_color, semaphore_color)
     html_report = html_report_valtest_global_drift(res, semaphore_title)
     precomputed = res.get("precomputed", {})
+
+    def number(value):
+        return float(value) if value is not None and math.isfinite(float(value)) else None
+
     return {
         "all_results": {
             "calculated_traffic_lights": {
@@ -181,8 +98,8 @@ def report_valtest_global_drift(res, semaphore_title):
             "reason": precomputed.get("reason"),
             "n_oos": precomputed.get("n_oos"),
             "n_oot": precomputed.get("n_oot"),
-            "metric_value_reference": precomputed.get("metric_value"),
-            "metric_value_monitoring": precomputed.get("metric_value_estimate"),
+            "metric_value_reference": number(precomputed.get("metric_value")),
+            "metric_value_monitoring": number(precomputed.get("metric_value_estimate")),
             "metric_value_source": precomputed.get("metric_value_source"),
             "selected_features": precomputed.get("selected_features", []),
             "feature_correlations": precomputed.get("feature_correlations", {}),
@@ -206,10 +123,10 @@ _REASON_BY_COLOR = {
 }
 
 _SEMAPHORE_TITLE = {
-    "red": "Результат теста динамики ключевой метрики соответствует красному светофору",
-    "green": "Результат теста динамики ключевой метрики соответствует зелёному светофору",
-    "yellow": "Результат теста динамики ключевой метрики соответствует жёлтому светофору",
-    "gray": "Результат теста динамики ключевой метрики не может быть оценён",
+    "red": "Результат теста глобального дрифта соответствует красному светофору",
+    "green": "Результат теста глобального дрифта соответствует зелёному светофору",
+    "yellow": "Результат теста глобального дрифта соответствует жёлтому светофору",
+    "gray": "Результат теста глобального дрифта не может быть оценён",
 }
 
 
@@ -229,7 +146,7 @@ def main(
     random_state: int = 42,
 ):
     """
-    Запуск теста на глобальный дрифт по размеченному scored_data ассессора.
+    Прогноз КМ по запросам OOT и размеченному эталону OOS.
 
     Изменения относительно baseline:
     - n_chunks default = MIN_CHUNKS=5 (P0-2)
@@ -276,15 +193,10 @@ def main(
         greater_is_better=greater_is_better,
         is_info=is_info,
         random_state=random_state,
+        metric_scale=monitoring_metric.get("baseline", {}).get("scale"),
         test_color=None,
         metric_value_estimate=None,
     )
-
-    pre = res["precomputed"]
-    if pre.get("metric_value") is not None:
-        pre["metric_value"] = round(pre["metric_value"], 3)
-    if pre.get("metric_value_estimate") is not None and not pd.isna(pre["metric_value_estimate"]):
-        pre["metric_value_estimate"] = round(pre["metric_value_estimate"], 3)
 
     semaphore_color = res["report"]["semaphore"]
     semaphore_title = _SEMAPHORE_TITLE[semaphore_color]

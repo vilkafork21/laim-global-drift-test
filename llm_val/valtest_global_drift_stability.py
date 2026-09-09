@@ -9,6 +9,7 @@
 import logging
 import typing as tp
 from copy import deepcopy
+from decimal import Decimal
 
 import numpy as np
 import pandas as pd
@@ -25,16 +26,8 @@ from sklearn.model_selection import train_test_split
 # Минимальное число чанков для статистически осмысленной корреляции (P0-5).
 MIN_CHUNKS = 5
 
-# Если задано n_chunks < MIN_CHUNKS, тест поднимет ошибку.
-# Verify против переобучения: n_chunks должно быть в ~4 раза больше числа фичей.
-MIN_CHUNKS_PER_FEATURE = 4
-
-# Адаптивный n_chunks: фиксированные 5 чанков делали отбор фичей статистически
-# невозможным (Bonferroni на 5 точках требует |r|≈0.96) — «вечный серый» отбора.
-# Число чанков масштабируется от объёма add-выборки: на чанк ≥ MIN_CHUNK_ROWS
-# строк, всего не более MAX_CHUNKS.
-MIN_CHUNK_ROWS = 10
-MAX_CHUNKS = 120
+MIN_CHUNK_ROWS = 20
+MAX_CHUNKS = 10
 
 
 # =============================================================================
@@ -97,10 +90,10 @@ def report_valtest_global_drift_stability(
     """
     metric_value_scalar = metric_value[main_metric]
 
-    if is_info or np.isnan(metric_value_estimate):
+    if is_info or not np.isfinite(metric_value_estimate):
         color = "gray"
     else:
-        abs_diff = metric_value_estimate - metric_value_scalar
+        abs_diff = float(Decimal(str(metric_value_estimate)) - Decimal(str(metric_value_scalar)))
         if greater_is_better:
             abs_diff = -abs_diff
         color_by_metric = semaphore_by_threshold(
@@ -111,7 +104,7 @@ def report_valtest_global_drift_stability(
     df = pd.DataFrame(
         {
             f"Значение метрики на {data_types[0]}": [round(float(metric_value_scalar), 4)],
-            f"Фактическое значение метрики на {data_types[1]}": [
+            f"Прогноз метрики на {data_types[1]}": [
                 round(float(metric_value_estimate), 4) if not np.isnan(metric_value_estimate) else None
             ],
             "Абсолютная разница": [
@@ -203,6 +196,7 @@ def valtest_global_drift_stability(
     metric_value: tp.Optional[tp.Dict[str, float]] = None,
     test_color: tp.Optional[str] = None,
     metric_value_estimate: tp.Optional[float] = None,
+    metric_scale: str = "ratio",
     **kwargs,
 ) -> tp.Dict[str, tp.Any]:
     """
@@ -215,8 +209,7 @@ def valtest_global_drift_stability(
        — считаем матрицу cosine_distances до base;
        — извлекаем scale-aware фичи;
        — считаем ключевую метрику на этом чанке.
-    3. Отбираем фичи: корреляция Пирсона + BH-FDR, при пустом отборе —
-       top-K по |r| с пометкой низкой значимости.
+    3. Отбираем признаки по Пирсону с поправкой Бонферрони; пустой отбор — серый.
     4. Обучаем RidgeCV: features → metric.
     5. На OOT извлекаем фичи **по чанкам того же размера** (P1-2) →
        предсказываем метрику чанк-за-чанком → усредняем.
@@ -226,23 +219,25 @@ def valtest_global_drift_stability(
     n_features = len(extractors)
     feature_names = [name for name, _ in extractors]
 
-    # P0-2/P0-5: жёсткое требование на n_chunks
-    if n_chunks < MIN_CHUNKS:
-        raise ValueError(
-            f"n_chunks={n_chunks} < {MIN_CHUNKS}: корреляционный тест статистически неинформативен"
-        )
-    if n_chunks < MIN_CHUNKS_PER_FEATURE * n_features:
-        logging.warning(
-            f"n_chunks={n_chunks} мало для {n_features} фичей; "
-            f"рекомендуется ≥ {MIN_CHUNKS_PER_FEATURE * n_features}. "
-            "Регрессия будет регуляризована (Ridge), но статистическая значимость низкая."
-        )
-
+    chunk_size_avg = None
     selected_features: tp.List[str] = []
     feature_correlations: tp.Dict[str, float] = {}
     selection_low_confidence = False
-    drift_metric_value_estimate = metric_value_estimate
-    metric_value_source = "precomputed"
+    metric_value_source = "query_distance_prediction"
+
+    def unavailable(reason: str, code: str = "invalid_data") -> dict:
+        logging.warning(reason)
+        result = _not_computable_result(
+            main_metric=main_metric, data_types=data_types,
+            semaphore_threshold=semaphore_threshold, greater_is_better=greater_is_better,
+            reason_code=code, reason=reason,
+            n_oos=len(getattr(sampler, data_types[0])["X"]),
+            n_oot=len(getattr(sampler, data_types[1])["X"]),
+        )
+        labels = getattr(sampler, data_types[0])["y"].to_numpy(dtype=float)
+        if labels.size and np.isfinite(labels).all():
+            result["precomputed"]["metric_value"] = float(labels.mean())
+        return result
 
     if metric_value_estimate is None:
         logging.info("Метрика на новых данных не вычислена заранее — начало вычисления")
@@ -262,52 +257,17 @@ def valtest_global_drift_stability(
         data_train = getattr(sampler_copy, data_types[0])
         data_test = getattr(sampler_copy, data_types[1])
         if len(data_test["X"]) == 0:
-            return _not_computable_result(
-                main_metric=main_metric,
-                data_types=data_types,
-                semaphore_threshold=semaphore_threshold,
-                greater_is_better=greater_is_better,
-                reason_code="no_scored_monitoring_units",
-                reason=(
-                    "scored_data не содержит ни одной оценённой единицы "
-                    "мониторинга (main_metric пуст)"
-                ),
-                n_oos=len(data_train["X"]),
-                n_oot=0,
-            )
-        minimum_oos = 2 * n_chunks - 1
-        if len(data_train["X"]) < minimum_oos:
-            return _not_computable_result(
-                main_metric=main_metric,
-                data_types=data_types,
-                semaphore_threshold=semaphore_threshold,
-                greater_is_better=greater_is_better,
-                reason_code="insufficient_reference_units",
-                reason=(
-                    "Недостаточно независимых единиц OOS для разбиения: "
-                    f"n_oos={len(data_train['X'])} < {minimum_oos} "
-                    f"при n_chunks={n_chunks}"
-                ),
-                n_oos=len(data_train["X"]),
-                n_oot=len(data_test["X"]),
-            )
+            return unavailable("Нет запросов мониторинга", "no_monitoring_units")
+        if len(data_train["X"]) < 200:
+            return unavailable("Для глобального дрифта требуется не менее 200 объектов OOS",
+                               "insufficient_reference_units")
+        if not np.isfinite(data_train["y"].to_numpy(dtype=float)).all():
+            return unavailable("Метки эталона содержат невалидные значения")
         base_X, add_X, base_Y, add_Y = train_test_split(
             data_train["X"], data_train["y"], test_size=0.5, random_state=random_state
         )
 
-        # Адаптивный n_chunks от объёма add: больше данных → больше точек для
-        # корреляции. Явно заданное БОЛЬШЕЕ n_chunks уважается, но клампится
-        # так, чтобы в чанке было ≥ 2 строк.
-        adaptive = max(MIN_CHUNKS, min(MAX_CHUNKS, len(add_X) // MIN_CHUNK_ROWS))
-        requested = max(n_chunks, adaptive)
-        feasible_max = max(MIN_CHUNKS, min(MAX_CHUNKS, len(add_X) // 2))
-        final_chunks = min(requested, feasible_max)
-        if final_chunks != n_chunks:
-            logging.info(
-                f"n_chunks {n_chunks} → {final_chunks} (адаптив от |add|={len(add_X)}, "
-                f"запрошено {requested}, потолок {feasible_max})"
-            )
-            n_chunks = final_chunks
+        n_chunks = min(MAX_CHUNKS, len(add_X) // MIN_CHUNK_ROWS)
 
         # P2-4: фильтр пустых question
         base_questions = [
@@ -322,9 +282,8 @@ def valtest_global_drift_stability(
 
         logging.info(f"Получение эмбеддингов base (n={len(base_q_list)})")
         base_embeddings = np.asarray(model.get_embedding(list(base_q_list)), dtype=float)
-        if np.isnan(base_embeddings).any():
-            logging.warning("В base_embeddings есть NaN — заменяю на 0")
-            base_embeddings = np.nan_to_num(base_embeddings, nan=0.0)
+        if not np.isfinite(base_embeddings).all():
+            return unavailable("Эмбеддинги OOS содержат невалидные значения")
 
         logging.info(f"Деление add на {n_chunks} чанков")
         chunk_idx_splits = np.array_split(add_X.index.values, n_chunks)
@@ -339,8 +298,8 @@ def valtest_global_drift_stability(
             chunk_Y = add_Y.loc[chunk_idx]
             chunk_questions = chunk_X["question"].astype(str).tolist()
             chunk_embeddings = np.asarray(model.get_embedding(chunk_questions), dtype=float)
-            if np.isnan(chunk_embeddings).any():
-                chunk_embeddings = np.nan_to_num(chunk_embeddings, nan=0.0)
+            if not np.isfinite(chunk_embeddings).all():
+                return unavailable("Эмбеддинги OOS содержат невалидные значения")
 
             D = distance_func(chunk_embeddings, base_embeddings)
             features[k] = _extract_features(D, extractors)
@@ -350,64 +309,18 @@ def valtest_global_drift_stability(
 
         # P0-1: устранён lambda-closure баг (никаких лишних замыканий)
         # P2-4: NaN-safety
-        if np.isnan(features).any():
-            features = np.nan_to_num(features, nan=0.0, posinf=1.0, neginf=-1.0)
+        if not np.isfinite(features).all():
+            return unavailable("Признаки расстояний содержат невалидные значения")
 
-        # Отбор фичей: BH-FDR + гарантированный top-K фолбэк. Пустой отбор не
-        # нужен: светофор считается по фактической метрике scored_data, фичи —
-        # диагностика дрифта. cap — анти-переобучение регрессии.
-        logging.info("Отбор фичей: Пирсон + BH-FDR (+ top-K фолбэк)")
-        all_corr = []
-        for j in range(n_features):
-            if np.std(features[:, j]) == 0.0:
-                continue  # константный столбец — корреляция не определена
-            corr_res = stats.pearsonr(features[:, j], test_metric_values)
-            if not (np.isfinite(corr_res.statistic) and np.isfinite(corr_res.pvalue)):
+        # Поправка учитывает все 11 признаков, включая константные.
+        for j, name in enumerate(feature_names):
+            if np.std(features[:, j]) == 0.0 or np.std(test_metric_values) == 0.0:
                 continue
-            feature_correlations[feature_names[j]] = float(corr_res.statistic)
-            all_corr.append(
-                (feature_names[j], float(corr_res.statistic), float(corr_res.pvalue))
-            )
-
-        cap = max(1, min(n_chunks // MIN_CHUNKS_PER_FEATURE, len(all_corr)))
-        strong = [c for c in all_corr if abs(c[1]) > corr_threshold]
-        if all_corr:
-            # BH по всем протестированным фичам: m = все тесты, иначе поправка
-            # анти-консервативна («double dipping»).
-            tested_sorted = sorted(all_corr, key=lambda c: c[2])
-            m = len(tested_sorted)
-            bh_k = 0
-            for i, (_, _, p) in enumerate(tested_sorted, start=1):
-                if p <= (i / m) * p_value:
-                    bh_k = i
-            bh_passed = {c[0] for c in tested_sorted[:bh_k]}
-            significant = [c for c in strong if c[0] in bh_passed]
-            selected_features = [
-                c[0] for c in sorted(significant, key=lambda c: -abs(c[1]))[:cap]
-            ]
-        if not selected_features and strong:
-            selection_low_confidence = True
-            selected_features = [
-                c[0] for c in sorted(strong, key=lambda c: -abs(c[1]))[:cap]
-            ]
-            logging.warning(
-                f"BH-FDR пуст — top-{len(selected_features)} из |r|>{corr_threshold} "
-                "(низкая значимость)"
-            )
-        if not selected_features and all_corr:
-            selection_low_confidence = True
-            selected_features = [
-                c[0] for c in sorted(all_corr, key=lambda c: -abs(c[1]))[:cap]
-            ]
-            logging.warning(
-                f"Ни одна фича не прошла |r|>{corr_threshold} — гарантированный "
-                f"top-{len(selected_features)} по |r| (низкая значимость)"
-            )
-
-        logging.info(
-            f"Отобрано {len(selected_features)} фичей: {selected_features} "
-            f"(low_confidence={selection_low_confidence})"
-        )
+            correlation, probability = stats.pearsonr(features[:, j], test_metric_values)
+            if np.isfinite(correlation) and np.isfinite(probability):
+                feature_correlations[name] = float(correlation)
+                if abs(correlation) > corr_threshold and probability < p_value / n_features:
+                    selected_features.append(name)
 
         # P2-1: Ridge с CV alpha вместо LinearRegression
         if selected_features:
@@ -419,20 +332,11 @@ def valtest_global_drift_stability(
             # P1-2: предсказание OOT по чанкам того же размера
             metric_value_estimate = _predict_oot_by_chunks(
                 data_test["X"], model, base_embeddings, distance_func,
-                extractors, sel_idx, ridge, chunk_size_avg
+                extractors, sel_idx, ridge, chunk_size_avg, metric_scale
             )
 
-            # Если метрика в [0, 1], клиппуем
-            if 0.0 <= test_metric_values.min() and test_metric_values.max() <= 1.0:
-                metric_value_estimate = float(np.clip(metric_value_estimate, 0.0, 1.0))
         else:
             metric_value_estimate = float("nan")
-
-        drift_metric_value_estimate = metric_value_estimate
-        metric_value_estimate = _scorer_calc_on_y(
-            scorer, data_test["y"], metric_agg, main_metric
-        )
-        metric_value_source = "assessor_scored_data"
 
         if metric_value is None or test_color is None:
             logging.info("Выставление светофора по метрике на OOS")
@@ -450,25 +354,32 @@ def valtest_global_drift_stability(
     precomputed = {
         "metric_value": metric_value[main_metric],
         "metric_value_estimate": metric_value_estimate,
-        "drift_metric_value_estimate": drift_metric_value_estimate,
+        "drift_metric_value_estimate": metric_value_estimate,
         "metric_value_source": metric_value_source,
         "selected_features": selected_features,
         "feature_correlations": feature_correlations,
         "selection_low_confidence": selection_low_confidence,
         "n_chunks": int(n_chunks),
+        "chunk_size": chunk_size_avg,
+        "semaphore_threshold": semaphore_threshold,
+        "n_oos": len(getattr(sampler, data_types[0])["X"]),
+        "n_oot": len(getattr(sampler, data_types[1])["X"]),
     }
     if not selected_features:
         precomputed.update({
-            "status": "computed",
+            "status": "not_computable",
             "reason_code": "no_significant_features",
             "reason": (
-                "Метрика мониторинга рассчитана по scored_data ассессора; "
-                "признаки расстояний константны — диагностика влияния "
-                "дрифта недоступна"
+                "Нет признаков, прошедших отбор Пирсона с поправкой Бонферрони; "
+                "прогноз влияния дрифта не вычисляется"
             ),
             "n_oos": len(getattr(sampler, data_types[0])["X"]),
             "n_oot": len(getattr(sampler, data_types[1])["X"]),
         })
+    if not np.isfinite(metric_value_estimate):
+        precomputed.setdefault("status", "not_computable")
+        precomputed.setdefault("reason", "Прогноз не вычислен: невалидные данные или нет значимых признаков")
+        logging.warning(precomputed["reason"])
     logging.info("Начало составления отчёта")
     report = report_valtest_global_drift_stability(
         metric_value=metric_value,
@@ -512,6 +423,7 @@ def _predict_oot_by_chunks(
     selected_indices: tp.List[int],
     regressor,
     chunk_size: int,
+    metric_scale: str = "ratio",
 ) -> float:
     """
     Предсказание метрики на OOT по чанкам того же размера, что в тренировке (P1-2).
@@ -526,8 +438,8 @@ def _predict_oot_by_chunks(
     questions = oot_X["question"].astype(str).tolist()
     # P2-4: эмбеддинги одним батчем (батчинг — внутри GigaEmbed после P1-7)
     embeddings = np.asarray(model.get_embedding(questions), dtype=float)
-    if np.isnan(embeddings).any():
-        embeddings = np.nan_to_num(embeddings, nan=0.0)
+    if not np.isfinite(embeddings).all():
+        return float("nan")
 
     predictions = []
     for start in range(0, n_oot, chunk_size):
@@ -536,9 +448,10 @@ def _predict_oot_by_chunks(
             continue
         D = distance_func(chunk_emb, base_embeddings)
         feats = _extract_features(D, extractors)
-        feats = np.nan_to_num(feats, nan=0.0, posinf=1.0, neginf=-1.0)
+        if not np.isfinite(feats).all():
+            return float("nan")
         pred = regressor.predict(feats[selected_indices].reshape(1, -1))[0]
-        predictions.append(pred)
+        predictions.append(float(np.clip(pred, 0.0, 1.0)) if metric_scale == "ratio" else pred)
 
     if not predictions:
         return float("nan")
