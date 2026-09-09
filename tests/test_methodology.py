@@ -59,18 +59,54 @@ def test_prediction_and_adaptive_chunks_are_independent_of_oot_labels():
     assert values[0] == values[1] == values[2]
     for result in results:
         assert result['precomputed']['metric_value_source'] == 'query_distance_prediction'
+        assert result['precomputed']['selection_low_confidence'] is False
         assert result['precomputed']['n_chunks'] == 10
         assert result['precomputed']['chunk_size'] >= 20
 
 
-def test_bonferroni_does_not_fall_back(monkeypatch):
+def test_empty_significance_selection_uses_limited_fallback(monkeypatch):
     from llm_val import valtest_global_drift_stability as drift
     from collections import namedtuple
     result_type = namedtuple('Correlation', 'statistic pvalue')
-    monkeypatch.setattr(drift.stats, 'pearsonr', lambda *args: result_type(.9, .01))
-    result = run(np.linspace(1., 0., 400), 1.)
-    assert result['report']['semaphore'] == 'gray'
-    assert result['precomputed']['selected_features'] == []
+    for correlation, probability in [(.9, .01), (.2, .5)]:
+        monkeypatch.setattr(drift.stats, 'pearsonr',
+                            lambda *args: result_type(correlation, probability))
+        results = [run(np.linspace(1., 0., 400), score) for score in [0., 1., np.nan]]
+        for result in results:
+            pre = result['precomputed']
+            assert result['report']['semaphore'] != 'gray'
+            assert 1 <= len(pre['selected_features']) <= pre['n_chunks'] // 4
+            assert pre['selection_low_confidence'] is True
+            assert np.isfinite(pre['metric_value_estimate'])
+        assert len({result['precomputed']['metric_value_estimate'] for result in results}) == 1
+
+
+def test_unrelated_reference_labels_still_produce_forecast_and_report():
+    import importlib.util
+    import json
+    from html_report import format_report_number
+
+    result = run(np.random.default_rng(42).binomial(1, .762, 3840), np.nan)
+    pre = result['precomputed']
+    assert pre['n_chunks'] == 10 and pre['chunk_size'] == 192
+    assert pre['selection_low_confidence'] is True
+    assert 0 <= pre['metric_value_estimate'] <= 1
+    assert result['report']['semaphore'] != 'gray'
+    ranked = sorted(pre['feature_correlations'],
+                    key=lambda name: abs(pre['feature_correlations'][name]), reverse=True)
+    assert pre['selected_features'] == ranked[:2]
+    spec = importlib.util.spec_from_file_location('global_fallback', NODE / 'main.py')
+    node = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(node)
+    output = node.report_valtest_global_drift(result, 'Результат')
+    assert output['all_results']['status'] == 'computed'
+    assert output['all_results']['metric_value_source'] == 'query_distance_prediction'
+    assert output['all_results']['metric_value_monitoring'] == pre['metric_value_estimate']
+    json.dumps(output['all_results'], allow_nan=False)
+    html = output['hidden_port']
+    assert format_report_number(pre['metric_value_estimate']) in html
+    assert 'статистическая значимость не подтверждена' in html
+    assert 'Не рассчитано' not in html
 
 
 def test_query_only_transport_and_json_gray_result():

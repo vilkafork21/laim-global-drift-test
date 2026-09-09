@@ -16,7 +16,7 @@
               "components": [
                 {
                   "parameter": "p_value",
-                  "label": "Порог p-value (FDR Бенджамини—Хохберга)",
+                  "label": "Порог p-value до поправки Бонферрони",
                   "uiComponent": "input",
                   "type": "float",
                   "defaultValue": 0.05

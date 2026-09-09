@@ -209,7 +209,8 @@ def valtest_global_drift_stability(
        — считаем матрицу cosine_distances до base;
        — извлекаем scale-aware фичи;
        — считаем ключевую метрику на этом чанке.
-    3. Отбираем признаки по Пирсону с поправкой Бонферрони; пустой отбор — серый.
+    3. Отбираем признаки по Пирсону с поправкой Бонферрони; при пустом отборе
+       используем лучшие по |r| с отметкой неподтверждённой значимости.
     4. Обучаем RidgeCV: features → metric.
     5. На OOT извлекаем фичи **по чанкам того же размера** (P1-2) →
        предсказываем метрику чанк-за-чанком → усредняем.
@@ -322,6 +323,18 @@ def valtest_global_drift_stability(
                 if abs(correlation) > corr_threshold and probability < p_value / n_features:
                     selected_features.append(name)
 
+        if not selected_features and feature_correlations:
+            # Как в audit-baseline: не более одного резервного признака на четыре чанка.
+            selected_features = sorted(
+                feature_correlations, key=lambda name: abs(feature_correlations[name]),
+                reverse=True,
+            )[:max(1, n_chunks // 4)]
+            selection_low_confidence = True
+            logging.warning(
+                "Значимых признаков нет; для прогноза выбрано %s признаков с наибольшей "
+                "|r|. Статистическая значимость отбора не подтверждена.", len(selected_features),
+            )
+
         # P2-1: Ridge с CV alpha вместо LinearRegression
         if selected_features:
             sel_idx = [feature_names.index(n) for n in selected_features]
@@ -370,8 +383,8 @@ def valtest_global_drift_stability(
             "status": "not_computable",
             "reason_code": "no_significant_features",
             "reason": (
-                "Нет признаков, прошедших отбор Пирсона с поправкой Бонферрони; "
-                "прогноз влияния дрифта не вычисляется"
+                "Не удалось рассчитать корреляции признаков с метрикой: "
+                "нет изменчивости признаков или оценок подвыборок; прогноз дрифта недоступен"
             ),
             "n_oos": len(getattr(sampler, data_types[0])["X"]),
             "n_oot": len(getattr(sampler, data_types[1])["X"]),
