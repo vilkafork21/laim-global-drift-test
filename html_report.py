@@ -46,41 +46,41 @@ def render_test_report(
     reason_html = f'<p class="report-reason">{escape(str(reason))}</p>' if reason else ""
     return f'''<article class="laim-test-report">
 <style>
-.laim-test-report {{box-sizing:border-box;max-width:980px;margin:24px auto;padding:32px 40px;
-  background:#fff;color:#24323b;font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
-  border:1px solid #dce2e5;border-radius:6px;text-align:left}}
+.laim-test-report {{box-sizing:border-box;width:100%;max-width:100%;min-width:0;margin:12px 0;padding:0;
+  background:#fff;color:#1f2937;font:13px/1.48 Inter,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  text-align:left;overflow-wrap:anywhere}}
 .laim-test-report * {{box-sizing:border-box}}
-.laim-test-report .test-number {{font-size:13px;color:#586b77;margin:0 0 6px}}
-.laim-test-report h2 {{font-size:27px;line-height:1.25;letter-spacing:-.4px;margin:0 0 12px;color:#192b36}}
-.laim-test-report h3 {{font-size:16px;margin:24px 0 8px;color:#192b36}}
-.laim-test-report p {{margin:8px 0 14px}}
-.laim-test-report .test-type {{font-size:13px;color:#586b77}}
-.laim-test-report table {{border-collapse:collapse;width:100%;table-layout:fixed;margin:10px 0 20px}}
-.laim-test-report th,.laim-test-report td {{padding:11px 16px;border-bottom:1px solid #dce2e5;
-  text-align:left;vertical-align:top;overflow-wrap:anywhere;font-weight:400}}
-.laim-test-report thead th {{background:#eaf0f3;font-weight:600}}
-.laim-test-report th:first-child {{width:60%}}
-.laim-test-report td {{font-variant-numeric:tabular-nums;color:#192b36}}
-.laim-test-report .result-row th,.laim-test-report .result-row td {{background:#f5f8f9;font-weight:600}}
-.laim-test-report .signal {{display:inline-flex;gap:4px;padding:5px 7px;border:1px solid #b7c3c9;
-  border-radius:16px;vertical-align:middle;margin-right:9px;background:#fff}}
-.laim-test-report .lamp {{width:10px;height:10px;border-radius:50%;display:block}}
+.laim-test-report .test-number {{font-size:11.5px;color:#64748b;margin:0 0 4px}}
+.laim-test-report h2 {{font-family:inherit;font-size:18px;font-weight:600;line-height:1.4;
+  margin:0 0 12px;color:#111827;letter-spacing:normal}}
+.laim-test-report h3 {{font-size:13px;font-weight:600;margin:14px 0 5px;color:#374151}}
+.laim-test-report p {{margin:5px 0 10px;white-space:normal}}
+.laim-test-report table {{border-collapse:collapse;width:100%;min-width:0;max-width:100%;
+  table-layout:fixed;margin:8px 0 12px;background:#fff}}
+.laim-test-report th,.laim-test-report td {{padding:7px 10px;border:1px solid #ddd;
+  font-family:inherit;font-size:12.75px !important;line-height:1.48;font-weight:400 !important;
+  text-align:left;vertical-align:top;white-space:normal;overflow-wrap:anywhere;word-break:normal;
+  color:#1f2937;background:#fff;letter-spacing:normal}}
+.laim-test-report thead th {{background:#f5f5f5;font-weight:600 !important;position:static}}
+.laim-test-report th:first-child {{width:58%}}
+.laim-test-report td {{font-variant-numeric:tabular-nums;color:#1f2937}}
+.laim-test-report tbody tr {{background:#fff}}
+.laim-test-report .result-row th,.laim-test-report .result-row td {{background:#fafafa}}
+.laim-test-report .signal {{display:inline-flex;gap:3px;vertical-align:middle;margin:0 7px 0 0;
+  padding:0;border:0;border-radius:0;background:transparent;box-shadow:none}}
+.laim-test-report .lamp {{width:8px;height:8px;border-radius:50%;display:block}}
 .laim-test-report .red {{background:#b83c3c}} .laim-test-report .yellow {{background:#d69c1b}}
-.laim-test-report .green {{background:#23825b}} .laim-test-report .inactive {{background:#dce2e5}}
-.laim-test-report .report-reason {{padding:10px 14px;background:#f5f8f9;border-left:3px solid #82939e}}
-.laim-test-report details {{border-top:1px solid #dce2e5;margin-top:24px;padding-top:14px}}
-.laim-test-report summary {{cursor:pointer;color:#334e60;font-weight:600}}
+.laim-test-report .green {{background:#23825b}} .laim-test-report .inactive {{background:#ddd}}
+.laim-test-report .report-reason {{color:#475569}}
+.laim-test-report details {{border:0;border-radius:0;box-shadow:none;margin:12px 0 0;padding:0;background:#fff}}
+.laim-test-report summary {{cursor:pointer;color:#475569;font-size:12px;font-weight:400}}
 .laim-test-report summary:focus-visible {{outline:2px solid #334e60;outline-offset:4px}}
 .laim-test-report img {{max-width:100%;height:auto}}
-@media(max-width:600px) {{.laim-test-report {{margin:8px auto;padding:20px 16px}}
-  .laim-test-report h2 {{font-size:23px}} .laim-test-report th,.laim-test-report td {{padding:9px 8px}}
-  .laim-test-report th:first-child {{width:56%}}}}
-@media print {{.laim-test-report {{border:0;margin:0;padding:0;max-width:none}}
-  .laim-test-report tr {{break-inside:avoid}}}}
+@media(max-width:600px) {{.laim-test-report th,.laim-test-report td {{padding:6px 7px}}}}
+@media print {{.laim-test-report tr {{break-inside:avoid}}}}
 </style>
 <p class="test-number">Тест {escape(test_id)} · Этап 4. Контроль качества при эксплуатации</p>
 <h2>{escape(title)}</h2>
-<p class="test-type">Базовый · Количественный</p>
 <h3>Цель теста</h3><p>{escape(purpose)}</p>
 <h3>Результаты теста</h3>
 <table aria-label="Результаты теста {escape(test_id)}"><thead><tr><th scope="col">Показатель</th>
